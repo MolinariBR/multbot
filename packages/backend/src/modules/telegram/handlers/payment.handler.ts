@@ -35,6 +35,7 @@ export async function processPayment(
             amount: amountInCents,
             description: `Pagamento via ${botConfig.name}`,
             customerName: `Telegram User ${userId}`,
+            userId: userId,
         });
 
         // 3. Calcular split

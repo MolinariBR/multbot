@@ -4,6 +4,7 @@ interface DepixPaymentRequest {
     amount: number; // em centavos
     description: string;
     customerName?: string;
+    userId?: number; // Telegram user ID para gerar EUID
 }
 
 interface DepixPaymentResponse {
@@ -58,7 +59,8 @@ class DepixService {
                 body: JSON.stringify({
                     amountInCents: request.amount,
                     endUserFullName: request.customerName || 'Usuário Telegram',
-                    euid: `telegram_${Date.now()}`, // Identificador único do usuário
+                    // EUID deve ter no mínimo 17 caracteres e começar com "EU"
+                    euid: `EU${String(request.userId || Date.now()).padStart(15, '0')}`,
                 }),
             });
 
