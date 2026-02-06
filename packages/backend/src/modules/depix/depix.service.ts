@@ -67,7 +67,7 @@ class DepixService {
                 throw new Error(`Depix API error ${response.status}: ${errorText}`);
             }
 
-            const data = await response.json();
+            const data = await response.json() as any;
 
             // Mapear resposta da Depix para o formato esperado
             const depixResponse: DepixPaymentResponse = {
@@ -104,7 +104,7 @@ class DepixService {
                 throw new Error(`Depix API error ${response.status}: ${errorText}`);
             }
 
-            const data = await response.json();
+            const data = await response.json() as any;
 
             // Mapear status da Depix para o formato esperado
             const statusMap: Record<string, 'pending' | 'completed' | 'failed'> = {
