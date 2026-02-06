@@ -137,18 +137,10 @@ model Transaction {
 ```
 multbot/
 ├── Docs/                    # Documentação e specs
-│   ├── Projeto.md           # Descrição do projeto
-│   ├── Depix-OpenAPI-3.0.0.yaml
-│   └── Pix2DePix API.apidog.json
 ├── packages/
-│   ├── frontend/            # App React + Vite
-│   │   ├── src/
-│   │   │   ├── components/  # Layout, ProtectedRoute
-│   │   │   ├── pages/       # Dashboard, Bots, Transações
-│   │   │   └── lib/         # API client, utils
-│   │   └── ...
-│   └── backend/             # (Em desenvolvimento)
-├── package.json             # Root workspace
+│   ├── frontend/            # App React (Admin Panel)
+│   ├── backend/             # API Node.js + Fastify + Prisma
+├── package.json             # Workspace Root
 └── pnpm-workspace.yaml
 ```
 
@@ -156,30 +148,27 @@ multbot/
 
 ## 🚀 Início Rápido
 
-### Pré-requisitos
-
-- Node.js 20+
-- pnpm 9+
-
 ### Instalação
 
 ```bash
-# Clonar repositório
-git clone <repo-url>
-cd multbot
-
-# Instalar dependências
+# Instalar dependências e preparar banco
 pnpm install
+cd packages/backend
+pnpm prisma db push
+pnpm prisma db seed
+cd ../..
 ```
 
 ### Desenvolvimento
 
 ```bash
-# Iniciar frontend
+# Iniciar Frontend + Backend simultaneamente
 pnpm dev
 ```
 
-O frontend estará disponível em `http://localhost:5173`
+- Frontend: `http://localhost:5173`
+- Backend API: `http://localhost:3000`
+- Documentação API: `http://localhost:3000/docs`
 
 ---
 
@@ -187,62 +176,27 @@ O frontend estará disponível em `http://localhost:5173`
 
 | Rota | Descrição |
 |------|-----------|
-| `/login` | Autenticação do administrador |
-| `/painel` | Dashboard com KPIs e estatísticas |
-| `/bots` | Gerenciamento de bots Telegram |
-| `/transacoes` | Histórico de transações |
+| `/configuracoes` | Configurações globais e integrações |
+| `/bots/:id` | Detalhes específicos de um bot |
+| `/transacoes/:id` | Detalhes financeiros de uma transação |
 
 ---
 
-## 🔐 Autenticação
+## 🔌 API Endpoints (Resumo)
 
-O sistema utiliza JWT (JSON Web Token) armazenado no localStorage:
+Consulte a documentação completa em `/docs` ou `Docs/MultBot-OpenAPI-3.0.yaml`.
 
-- **Login**: `POST /api/auth/login`
-- **Token**: Enviado no header `Authorization: Bearer <token>`
-- **Expiração**: 24 horas
-
-### Credenciais de Teste
-
-```
-Email: admin@test.com
-Senha: password123
-```
-
----
-
-## 🔌 API Endpoints
-
-### Autenticação
+### Settings
 
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
-| POST | `/api/auth/login` | Login com email/senha |
+| GET | `/api/settings` | Obter configurações |
+| PUT | `/api/settings` | Atualizar configurações |
+| POST | `/api/settings/test-depix` | Testar conexão |
 
-### Dashboard
+### Bots & Transações
 
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/dashboard/stats` | KPIs agregados |
-
-### Bots
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/bots` | Listar bots |
-| POST | `/api/bots` | Criar bot |
-| GET | `/api/bots/:id` | Detalhes do bot |
-| PATCH | `/api/bots/:id` | Atualizar bot |
-| DELETE | `/api/bots/:id` | Remover bot |
-
-### Transações
-
-| Método | Endpoint | Descrição |
-|--------|----------|-----------|
-| GET | `/api/transactions` | Listar transações |
-| GET | `/api/transactions/:id` | Detalhes da transação |
-
----
+Endpoints CRUD completos disponíveis.
 
 ## 📊 Modelo de Dados
 
