@@ -49,8 +49,11 @@ class DepixService {
         }
 
         try {
-            // Gerar EUID no formato correto
-            const euid = `EU${String(request.userId || Date.now()).padStart(15, '0')}`;
+            // Gerar EUID no formato correto: EU + 15 dígitos
+            // Usar timestamp + userId para garantir unicidade
+            const timestamp = Date.now().toString().slice(-8); // últimos 8 dígitos do timestamp
+            const userIdStr = String(request.userId || 0).padStart(7, '0'); // 7 dígitos do userId
+            const euid = `EU${timestamp}${userIdStr}`; // Total: 2 + 8 + 7 = 17 caracteres
 
             const payload = {
                 amountInCents: request.amount,
