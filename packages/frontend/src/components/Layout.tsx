@@ -1,4 +1,4 @@
-import { useState, ReactNode } from 'react'
+import { useState, useEffect, ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Bot, History, Menu, X, Zap, LogOut, TrendingUp, Settings } from 'lucide-react'
 
