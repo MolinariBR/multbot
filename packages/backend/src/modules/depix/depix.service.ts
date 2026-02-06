@@ -49,6 +49,17 @@ class DepixService {
         }
 
         try {
+            // Gerar EUID no formato correto
+            const euid = `EU${String(request.userId || Date.now()).padStart(15, '0')}`;
+
+            const payload = {
+                amountInCents: request.amount,
+                endUserFullName: request.customerName || 'Usuário Telegram',
+                euid: euid,
+            };
+
+            console.log('📤 Enviando para Depix:', JSON.stringify(payload, null, 2));
+
             // Criar depósito na API Depix
             const response = await fetch(`${this.apiUrl}/deposit`, {
                 method: 'POST',
@@ -56,12 +67,7 @@ class DepixService {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${this.apiKey}`,
                 },
-                body: JSON.stringify({
-                    amountInCents: request.amount,
-                    endUserFullName: request.customerName || 'Usuário Telegram',
-                    // EUID deve ter no mínimo 17 caracteres e começar com "EU"
-                    euid: `EU${String(request.userId || Date.now()).padStart(15, '0')}`,
-                }),
+                body: JSON.stringify(payload),
             });
 
             if (!response.ok) {
