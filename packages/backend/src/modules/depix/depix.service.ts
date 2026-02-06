@@ -74,11 +74,16 @@ class DepixService {
 
             const data = await response.json() as any;
 
+            console.log('📥 Resposta da Depix:', JSON.stringify(data, null, 2));
+
+            // A resposta vem dentro de data.response
+            const depositData = data.response || data;
+
             // Mapear resposta da Depix para o formato esperado
             const depixResponse: DepixPaymentResponse = {
-                paymentId: data.id,
-                pixKey: data.qrCopyPaste,
-                qrCode: data.qrImageUrl,
+                paymentId: depositData.id,
+                pixKey: depositData.qrCopyPaste,
+                qrCode: depositData.qrImageUrl,
                 amount: request.amount,
                 expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min padrão
             };
