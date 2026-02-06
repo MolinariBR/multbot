@@ -45,6 +45,7 @@ export async function processPayment(
         const transaction = await prisma.transaction.create({
             data: {
                 botId,
+                telegramUserId: userId.toString(),
                 depixPaymentId: depixPayment.paymentId,
                 amountBrl: amountInCents,
                 depixAmount: 0, // Será atualizado quando o pagamento for confirmado

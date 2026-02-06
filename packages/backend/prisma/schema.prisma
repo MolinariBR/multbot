@@ -36,6 +36,7 @@ model Bot {
 model Transaction {
   id              String    @id @default(cuid())
   botId           String
+  telegramUserId  String?   // ID do usuário do Telegram que fez o pagamento
   depixPaymentId  String?   // ID do depósito na Depix (qrId)
   amountBrl       Int       // Valor em centavos
   depixAmount     Int       @default(0) // Valor Depix em satoshis

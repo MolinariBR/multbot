@@ -169,15 +169,78 @@ class TelegramBotManager {
                 return;
             }
 
-            // Buscar transações do usuário
-            // TODO: Adicionar campo telegramUserId na tabela Transaction
-            await bot.sendMessage(
-                chatId,
-                `📊 *Status de Pagamentos*\n\n` +
-                `Funcionalidade em desenvolvimento.\n\n` +
-                `Em breve você poderá consultar o histórico de seus pagamentos.`,
-                { parse_mode: 'Markdown' }
-            );
+            try {
+                // Buscar últimas 10 transações do usuário
+                const transactions = await prisma.transaction.findMany({
+                    where: {
+                        telegramUserId: userId.toString(),
+                    },
+                    orderBy: {
+                        createdAt: 'desc',
+                    },
+                    take: 10,
+                });
+
+                if (transactions.length === 0) {
+                    await bot.sendMessage(
+                        chatId,
+                        `📊 *Meus Pagamentos*\n\n` +
+                        `Você ainda não fez nenhum pagamento.\n\n` +
+                        `Use /pagar para fazer seu primeiro pagamento!`,
+                        { parse_mode: 'Markdown' }
+                    );
+                    return;
+                }
+
+                // Formatar lista de transações
+                const statusEmoji: Record<string, string> = {
+                    'processing': '⏳',
+                    'completed': '✅',
+                    'failed': '❌',
+                };
+
+                const statusText: Record<string, string> = {
+                    'processing': 'Processando',
+                    'completed': 'Concluído',
+                    'failed': 'Falhou',
+                };
+
+                let message = `📊 *Meus Pagamentos*\n\n`;
+                message += `Últimas ${transactions.length} transações:\n\n`;
+
+                for (const tx of transactions) {
+                    const emoji = statusEmoji[tx.status] || '❓';
+                    const status = statusText[tx.status] || tx.status;
+                    const valor = (tx.amountBrl / 100).toFixed(2);
+                    const data = new Date(tx.createdAt).toLocaleDateString('pt-BR', {
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                    });
+
+                    message += `${emoji} *R$ ${valor}* - ${status}\n`;
+                    message += `   📅 ${data}\n`;
+
+                    if (tx.payerName) {
+                        message += `   👤 ${tx.payerName}\n`;
+                    }
+
+                    message += `\n`;
+                }
+
+                message += `\n💡 Use /pagar para fazer um novo pagamento.`;
+
+                await bot.sendMessage(chatId, message, { parse_mode: 'Markdown' });
+
+            } catch (error) {
+                console.error('Erro ao buscar transações:', error);
+                await bot.sendMessage(
+                    chatId,
+                    '❌ Erro ao buscar histórico de pagamentos. Tente novamente mais tarde.'
+                );
+            }
         });
 
         // Handler: Mensagens de texto do menu
