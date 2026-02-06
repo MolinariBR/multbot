@@ -44,8 +44,8 @@ async function main() {
         console.log('✅ Settings criado');
     }
 
-    // Criar dados de exemplo (opcional, para desenvolvimento)
-    if (process.env.NODE_ENV === 'development') {
+    // Criar dados de exemplo (opcional, para desenvolvimento ou se forçado)
+    if (process.env.NODE_ENV === 'development' || process.env.FORCE_SAMPLE_DATA === 'true') {
         const existingBot = await prisma.bot.findFirst();
 
         if (!existingBot) {
