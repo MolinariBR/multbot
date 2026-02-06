@@ -9,9 +9,10 @@ export interface JwtPayload {
 }
 
 export function signToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-    return jwt.sign(payload, env.JWT_SECRET, {
-        expiresIn: env.JWT_EXPIRES_IN,
-    });
+    const options: jwt.SignOptions = {
+        expiresIn: env.JWT_EXPIRES_IN as any,
+    };
+    return jwt.sign(payload, env.JWT_SECRET, options);
 }
 
 export function verifyToken(token: string): JwtPayload {

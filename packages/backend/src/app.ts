@@ -28,7 +28,7 @@ export async function buildApp() {
     // Plugins
     await app.register(cors, corsOptions);
     await app.register(swagger, swaggerOptions);
-    await app.register(scalarPlugin, scalarOptions);
+    await app.register(scalarPlugin, scalarOptions as any);
 
     // Auth hook (protege rotas)
     app.addHook('onRequest', authHook);
@@ -43,10 +43,10 @@ export async function buildApp() {
         }
 
         // Erros de validação do Fastify
-        if (error.validation) {
+        if (error && typeof error === 'object' && 'validation' in error) {
             return reply.status(400).send({
                 error: 'Dados inválidos',
-                details: error.validation,
+                details: (error as any).validation,
             });
         }
 

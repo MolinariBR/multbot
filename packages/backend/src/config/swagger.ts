@@ -1,5 +1,4 @@
 import type { FastifyDynamicSwaggerOptions } from '@fastify/swagger';
-import type { FastifySwaggerUiOptions } from '@fastify/swagger-ui';
 
 export const swaggerOptions: FastifyDynamicSwaggerOptions = {
     openapi: {
