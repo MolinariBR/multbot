@@ -52,6 +52,13 @@ export const depixRoutes: FastifyPluginAsync = async (app) => {
                 amount: payload.valueInCents,
                 liquidAmount: 0, // Depix não envia isso no webhook
                 txId: payload.blockchainTxID,
+
+                // Informações do Pagador
+                payerName: payload.payerName,
+                payerTaxNumber: payload.payerTaxNumber,
+                payerEUID: payload.payerEUID,
+                bankTxId: payload.bankTxId,
+                customerMessage: payload.customerMessage,
             };
 
             await depixService.handleWebhook(internalPayload);

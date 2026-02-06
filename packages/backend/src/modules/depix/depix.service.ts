@@ -21,6 +21,13 @@ interface DepixWebhookPayload {
     amount: number;
     liquidAmount: number; // em satoshis
     txId?: string;
+
+    // Informações do Pagador
+    payerName?: string;
+    payerTaxNumber?: string;
+    payerEUID?: string;
+    bankTxId?: string;
+    customerMessage?: string;
 }
 
 class DepixService {
@@ -162,7 +169,7 @@ class DepixService {
                 return;
             }
 
-            // Atualizar status da transação
+            // Atualizar status da transação e informações do pagador
             const updatedTransaction = await prisma.transaction.update({
                 where: { id: transaction.id },
                 data: {
@@ -170,6 +177,14 @@ class DepixService {
                         payload.status === 'failed' ? 'failed' : 'processing',
                     depixAmount: payload.liquidAmount,
                     completedAt: payload.status === 'completed' ? new Date() : null,
+
+                    // Informações do Pagador (do webhook)
+                    payerName: payload.payerName,
+                    payerTaxNumber: payload.payerTaxNumber,
+                    payerEUID: payload.payerEUID,
+                    bankTxId: payload.bankTxId,
+                    blockchainTxId: payload.txId,
+                    customerMessage: payload.customerMessage,
                 },
             });
 

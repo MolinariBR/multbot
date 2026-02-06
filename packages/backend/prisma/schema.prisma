@@ -47,6 +47,14 @@ model Transaction {
   createdAt       DateTime  @default(now())
   completedAt     DateTime?
   
+  // Informações do Pagador (capturadas do webhook Depix)
+  payerName       String?   // Nome completo do pagador
+  payerTaxNumber  String?   // CPF/CNPJ do pagador
+  payerEUID       String?   // EUID gerado pela Depix
+  bankTxId        String?   // ID da transação bancária
+  blockchainTxId  String?   // TX na Liquid Network
+  customerMessage String?   // Mensagem do pagador
+  
   bot Bot @relation(fields: [botId], references: [id])
 }
 
