@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Administrador da plataforma
+model Admin {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String   // bcrypt hash
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Bot Telegram de cada logista
+model Bot {
+  id               String        @id @default(cuid())
+  name             String
+  telegramToken    String        @unique
+  telegramUsername String?
+  ownerName        String        // Nome do logista
+  depixAddress     String        // Endereço Liquid para recebimento
+  splitRate        Float         @default(0.10) // Taxa da plataforma (10%)
+  status           String        @default("active") // active | inactive
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  transactions     Transaction[]
+}
+
+// Transação de pagamento
+model Transaction {
+  id            String    @id @default(cuid())
+  botId         String
+  amountBrl     Int       // Valor em centavos
+  depixAmount   Int       @default(0) // Valor Depix em satoshis
+  merchantSplit Int       // Valor do logista em centavos
+  adminSplit    Int       // Valor da plataforma em centavos
+  pixKey        String?   // Chave PIX usada
+  customerName  String?   // Nome do cliente final
+  status        String    @default("processing") // processing | completed | failed
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+  
+  bot Bot @relation(fields: [botId], references: [id])
+}
+
+// Configurações da plataforma (singleton)
+model Settings {
+  id                  String  @id @default("settings")
+  defaultSplitRate    Float   @default(0.10)
+  minSplitRate        Float   @default(0.05)
+  maxSplitRate        Float   @default(0.30)
+  depixApiUrl         String  @default("")
+  depixApiKey         String  @default("")
+  depixWebhookSecret  String  @default("")
+  telegramApiId       String  @default("")
+  telegramApiHash     String  @default("")
+  telegramPhone       String  @default("")
+  telegramSession     String  @default("")
+  notifyEmail         Boolean @default(false)
+  notifyTelegram      Boolean @default(false)
+  notifyMinAmount     Int     @default(10000) // R$ 100,00 em centavos
+  updatedAt           DateTime @updatedAt
+}
