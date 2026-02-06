@@ -49,17 +49,10 @@ class DepixService {
         }
 
         try {
-            // Gerar EUID no formato correto: EU + 15 dígitos (total 17 caracteres)
-            // Usar timestamp + userId para garantir unicidade
-            const timestamp = Date.now().toString().slice(-8); // últimos 8 dígitos do timestamp
-            const userId = request.userId || 0;
-            const userIdStr = String(userId).slice(-7).padStart(7, '0'); // últimos 7 dígitos do userId
-            const euid = `EU${timestamp}${userIdStr}`; // Total: 2 + 8 + 7 = 17 caracteres
-
             const payload = {
                 amountInCents: request.amount,
                 endUserFullName: request.customerName || 'Usuário Telegram',
-                euid: euid,
+                // Não enviar EUID - deixar a Depix gerar automaticamente
             };
 
             console.log('📤 Enviando para Depix:', JSON.stringify(payload, null, 2));
