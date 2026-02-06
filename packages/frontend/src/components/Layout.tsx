@@ -29,6 +29,25 @@ export default function Layout({ children }: LayoutProps) {
 
   const isActive = (path: string) => location.pathname === path
 
+  const [stats, setStats] = useState<{ botsCount: number; totalRevenue: number } | null>(null)
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const { data } = await import('../lib/api').then(m => m.api.get('/dashboard/stats'));
+        setStats(data);
+      } catch (error) {
+        console.error('Erro ao buscar stats da sidebar:', error);
+      }
+    };
+
+    fetchStats();
+
+    // Atualizar a cada 60 segundos
+    const interval = setInterval(fetchStats, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
     <div className="flex h-screen bg-black overflow-hidden">
       {/* Mobile Overlay */}
@@ -74,8 +93,8 @@ export default function Layout({ children }: LayoutProps) {
                 key={item.name}
                 to={item.href}
                 className={`flex items-center gap-4 px-4 py-3 rounded-xl transition-all group ${active
-                    ? 'bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 text-white border border-violet-500/30 shadow-lg shadow-violet-500/10'
-                    : 'text-gray-400 hover:text-white hover:bg-white/5'
+                  ? 'bg-gradient-to-r from-violet-500/20 to-fuchsia-500/20 text-white border border-violet-500/30 shadow-lg shadow-violet-500/10'
+                  : 'text-gray-400 hover:text-white hover:bg-white/5'
                   } ${collapsed ? 'justify-center' : ''}`}
                 onClick={() => setMobileOpen(false)}
               >
@@ -93,7 +112,7 @@ export default function Layout({ children }: LayoutProps) {
         </nav>
 
         {/* Platform Stats */}
-        {!collapsed && (
+        {!collapsed && stats && (
           <div className="px-4 pb-6">
             <div className="bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 rounded-xl p-4 border border-violet-500/20">
               <div className="flex items-center gap-2 mb-3">
@@ -103,14 +122,16 @@ export default function Layout({ children }: LayoutProps) {
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400 text-xs">Bots Ativos</span>
-                  <span className="text-white font-bold text-sm">24</span>
+                  <span className="text-white font-bold text-sm">{stats.botsCount}</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400 text-xs">Volume Depix</span>
-                  <span className="text-emerald-400 font-bold text-sm">₿ 145.8k</span>
+                  <span className="text-gray-400 text-xs">Volume Total</span>
+                  <span className="text-emerald-400 font-bold text-sm">
+                    R$ {(stats.totalRevenue / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
                 </div>
                 <div className="w-full bg-black/50 rounded-full h-1.5 mt-3">
-                  <div className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-1.5 rounded-full w-3/4" />
+                  <div className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-1.5 rounded-full animate-pulse" style={{ width: '100%' }} />
                 </div>
               </div>
             </div>
