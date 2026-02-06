@@ -34,17 +34,18 @@ model Bot {
 
 // Transação de pagamento
 model Transaction {
-  id            String    @id @default(cuid())
-  botId         String
-  amountBrl     Int       // Valor em centavos
-  depixAmount   Int       @default(0) // Valor Depix em satoshis
-  merchantSplit Int       // Valor do logista em centavos
-  adminSplit    Int       // Valor da plataforma em centavos
-  pixKey        String?   // Chave PIX usada
-  customerName  String?   // Nome do cliente final
-  status        String    @default("processing") // processing | completed | failed
-  createdAt     DateTime  @default(now())
-  completedAt   DateTime?
+  id              String    @id @default(cuid())
+  botId           String
+  depixPaymentId  String?   // ID do depósito na Depix (qrId)
+  amountBrl       Int       // Valor em centavos
+  depixAmount     Int       @default(0) // Valor Depix em satoshis
+  merchantSplit   Int       // Valor do logista em centavos
+  adminSplit      Int       // Valor da plataforma em centavos
+  pixKey          String?   // Chave PIX usada
+  customerName    String?   // Nome do cliente final
+  status          String    @default("processing") // processing | completed | failed
+  createdAt       DateTime  @default(now())
+  completedAt     DateTime?
   
   bot Bot @relation(fields: [botId], references: [id])
 }

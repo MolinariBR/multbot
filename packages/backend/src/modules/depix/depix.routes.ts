@@ -11,13 +11,20 @@ export const depixRoutes: FastifyPluginAsync = async (app) => {
             body: {
                 type: 'object',
                 properties: {
-                    paymentId: { type: 'string' },
-                    status: { type: 'string', enum: ['pending', 'completed', 'failed'] },
-                    amount: { type: 'number' },
-                    liquidAmount: { type: 'number' },
-                    txId: { type: 'string' },
+                    webhookType: { type: 'string' },
+                    qrId: { type: 'string' },
+                    status: { type: 'string' },
+                    valueInCents: { type: 'number' },
+                    pixKey: { type: 'string' },
+                    payerName: { type: 'string' },
+                    payerTaxNumber: { type: 'string' },
+                    payerEUID: { type: 'string' },
+                    bankTxId: { type: 'string' },
+                    blockchainTxID: { type: 'string' },
+                    customerMessage: { type: 'string' },
+                    expiration: { type: 'string' },
                 },
-                required: ['paymentId', 'status', 'amount', 'liquidAmount'],
+                required: ['webhookType', 'qrId', 'status', 'valueInCents'],
             },
         },
     }, async (request, reply) => {
@@ -25,7 +32,29 @@ export const depixRoutes: FastifyPluginAsync = async (app) => {
             // TODO: Validar assinatura do webhook com DEPIX_WEBHOOK_SECRET
 
             const payload = request.body as any;
-            await depixService.handleWebhook(payload);
+
+            // Mapear payload da Depix para o formato interno
+            const statusMap: Record<string, 'pending' | 'completed' | 'failed'> = {
+                'pending': 'pending',
+                'pending_pix2fa': 'pending',
+                'depix_sent': 'completed',
+                'under_review': 'pending',
+                'canceled': 'failed',
+                'error': 'failed',
+                'refunded': 'failed',
+                'expired': 'failed',
+                'delayed': 'pending',
+            };
+
+            const internalPayload = {
+                paymentId: payload.qrId,
+                status: statusMap[payload.status] || 'pending',
+                amount: payload.valueInCents,
+                liquidAmount: 0, // Depix não envia isso no webhook
+                txId: payload.blockchainTxID,
+            };
+
+            await depixService.handleWebhook(internalPayload);
 
             return reply.status(200).send({ received: true });
         } catch (error) {

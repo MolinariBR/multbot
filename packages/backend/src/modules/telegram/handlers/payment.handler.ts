@@ -44,15 +44,13 @@ export async function processPayment(
         const transaction = await prisma.transaction.create({
             data: {
                 botId,
+                depixPaymentId: depixPayment.paymentId,
                 amountBrl: amountInCents,
                 depixAmount: 0, // Será atualizado quando o pagamento for confirmado
                 merchantSplit: split.merchantSplit,
                 adminSplit: split.adminSplit,
                 pixKey: depixPayment.pixKey,
                 status: 'processing',
-                // TODO: Adicionar campos telegramUserId e depixPaymentId ao schema
-                // telegramUserId: userId.toString(),
-                // depixPaymentId: depixPayment.paymentId,
             },
         });
 

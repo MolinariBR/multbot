@@ -48,41 +48,39 @@ class DepixService {
         }
 
         try {
-            // TODO: Implementar chamada real à API Depix
-            // Por enquanto, retornamos dados mockados para desenvolvimento
+            // Criar depósito na API Depix
+            const response = await fetch(`${this.apiUrl}/deposit`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.apiKey}`,
+                },
+                body: JSON.stringify({
+                    amountInCents: request.amount,
+                    endUserFullName: request.customerName || 'Usuário Telegram',
+                    euid: `telegram_${Date.now()}`, // Identificador único do usuário
+                }),
+            });
 
-            const mockResponse: DepixPaymentResponse = {
-                paymentId: `depix_${Date.now()}`,
-                pixKey: '00020126580014br.gov.bcb.pix0136' + Math.random().toString(36).substring(7),
-                qrCode: 'https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=mock',
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Depix API error ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+
+            // Mapear resposta da Depix para o formato esperado
+            const depixResponse: DepixPaymentResponse = {
+                paymentId: data.id,
+                pixKey: data.qrCopyPaste,
+                qrCode: data.qrImageUrl,
                 amount: request.amount,
-                expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min
+                expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min padrão
             };
 
-            console.log(`💳 Pagamento Depix criado: ${mockResponse.paymentId}`);
-            return mockResponse;
+            console.log(`💳 Pagamento Depix criado: ${depixResponse.paymentId}`);
+            return depixResponse;
 
-            /* Implementação real:
-            const response = await fetch(`${this.apiUrl}/payments`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-              },
-              body: JSON.stringify({
-                amount: request.amount,
-                currency: 'BRL',
-                description: request.description,
-                customer_name: request.customerName,
-              }),
-            });
-      
-            if (!response.ok) {
-              throw new Error(`Depix API error: ${response.status}`);
-            }
-      
-            return await response.json();
-            */
         } catch (error) {
             console.error('❌ Erro ao criar pagamento Depix:', error);
             throw error;
@@ -95,29 +93,40 @@ class DepixService {
         }
 
         try {
-            // TODO: Implementar chamada real à API Depix
-            const mockResponse: DepixWebhookPayload = {
-                paymentId,
-                status: 'pending',
-                amount: 10000, // R$ 100,00
-                liquidAmount: 30000, // 30000 sats
+            const response = await fetch(`${this.apiUrl}/deposit-status?id=${paymentId}`, {
+                headers: {
+                    'Authorization': `Bearer ${this.apiKey}`,
+                },
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Depix API error ${response.status}: ${errorText}`);
+            }
+
+            const data = await response.json();
+
+            // Mapear status da Depix para o formato esperado
+            const statusMap: Record<string, 'pending' | 'completed' | 'failed'> = {
+                'pending': 'pending',
+                'pending_pix2fa': 'pending',
+                'depix_sent': 'completed',
+                'under_review': 'pending',
+                'canceled': 'failed',
+                'error': 'failed',
+                'refunded': 'failed',
+                'expired': 'failed',
+                'delayed': 'pending',
             };
 
-            return mockResponse;
+            return {
+                paymentId: data.qrId,
+                status: statusMap[data.status] || 'pending',
+                amount: data.valueInCents,
+                liquidAmount: 0, // Será preenchido quando disponível
+                txId: data.blockchainTxID,
+            };
 
-            /* Implementação real:
-            const response = await fetch(`${this.apiUrl}/payments/${paymentId}`, {
-              headers: {
-                'Authorization': `Bearer ${this.apiKey}`,
-              },
-            });
-      
-            if (!response.ok) {
-              throw new Error(`Depix API error: ${response.status}`);
-            }
-      
-            return await response.json();
-            */
         } catch (error) {
             console.error('❌ Erro ao consultar pagamento Depix:', error);
             throw error;
@@ -128,12 +137,10 @@ class DepixService {
         try {
             console.log('📥 Webhook Depix recebido:', payload);
 
-            // Buscar transação pelo paymentId
-            // TODO: Adicionar campo depixPaymentId na tabela Transaction
+            // Buscar transação pelo depixPaymentId
             const transaction = await prisma.transaction.findFirst({
                 where: {
-                    // depixPaymentId: payload.paymentId,
-                    id: payload.paymentId, // Temporário
+                    depixPaymentId: payload.paymentId,
                 },
                 include: {
                     bot: true,
