@@ -4,6 +4,7 @@
 
 * `./deploy.sh`: Faz o deploy do projeto.
 * `./setup-ssl.sh`: Configura o SSL.
+* `./vps-update.sh`: Atualiza o código (git pull), aplica `prisma db push` no banco de produção e reinicia serviços.
 
 
 ## COMANDOS ÚTEIS PM2

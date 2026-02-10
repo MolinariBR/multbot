@@ -201,6 +201,13 @@ VITE_API_URL=/api pnpm build
 sudo cp -r dist/* /var/www/html/
 ```
 
+**Recomendado (atualização automatizada no Droplet):**
+```bash
+cd /root/multbot
+chmod +x vps-update.sh
+./vps-update.sh
+```
+
 ---
 
 ## 🔒 Configurar HTTPS (Opcional mas Recomendado)
