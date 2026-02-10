@@ -12,7 +12,6 @@ export default function Layout({ children }: LayoutProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
-  const adminName = localStorage.getItem('adminName') || 'Admin'
 
   const handleLogout = () => {
     localStorage.removeItem('accessToken')
@@ -82,7 +81,7 @@ export default function Layout({ children }: LayoutProps) {
                 <Zap className="text-white" size={24} />
               </div>
               <div>
-                <h1 className="text-white font-bold text-lg leading-none">Admin Depix</h1>
+                <h1 className="text-white font-bold text-lg leading-none">Zydra.org</h1>
                 <p className="text-violet-400 text-xs mt-0.5">Rede Liquid</p>
               </div>
             </div>
@@ -189,10 +188,6 @@ export default function Layout({ children }: LayoutProps) {
           <div className="hidden lg:block" />
 
           <div className="flex items-center gap-6">
-            <div className="text-right hidden sm:block">
-              <p className="text-white font-semibold text-sm">{adminName}</p>
-              <p className="text-violet-400 text-xs">Plataforma MultiBot</p>
-            </div>
             <button
               onClick={handleLogout}
               className="p-2.5 rounded-lg hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-all"
@@ -200,9 +195,6 @@ export default function Layout({ children }: LayoutProps) {
             >
               <LogOut size={20} />
             </button>
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold shadow-lg shadow-violet-500/30">
-              AD
-            </div>
           </div>
         </header>
 
