@@ -179,6 +179,8 @@ class DepixService {
                 return;
             }
 
+            const previousStatus = transaction.status;
+
             // Atualizar status da transação e informações do pagador
             const updatedTransaction = await prisma.transaction.update({
                 where: { id: transaction.id },
@@ -199,6 +201,12 @@ class DepixService {
             });
 
             console.log(`✅ Transação ${transaction.id} atualizada: ${payload.status}`);
+
+            // Admin notifications (only when status transitions)
+            if (payload.status === 'completed' && previousStatus !== 'completed') {
+                const { notifyTransactionCompleted } = await import('../notifications/notifications.service.js');
+                await notifyTransactionCompleted(updatedTransaction.id);
+            }
 
             // Se pagamento foi confirmado, processar confirmação
             if (payload.status === 'completed') {

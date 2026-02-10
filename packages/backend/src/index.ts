@@ -17,6 +17,10 @@ async function main() {
         const { telegramBotManager } = await import('./modules/telegram/telegram-bot.service.js');
         await telegramBotManager.initializeAllBots();
 
+        // Admin notifications (Telegram bot)
+        const { adminTelegramBot } = await import('./modules/notifications/admin-telegram-bot.service.js');
+        adminTelegramBot.initialize();
+
         // Iniciar servidor
         await app.listen({ port: env.PORT, host: env.HOST });
         console.log(`🚀 Servidor rodando em http://${env.HOST}:${env.PORT}`);

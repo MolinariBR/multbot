@@ -12,6 +12,7 @@ import { transactionsRoutes } from './modules/transactions/transactions.routes.j
 import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { authHook } from './lib/auth-hook.js';
 import { depixRoutes } from './modules/depix/depix.routes.js';
+import { notificationsRoutes } from './modules/notifications/notifications.routes.js';
 
 export async function buildApp() {
     const app = Fastify({
@@ -64,6 +65,7 @@ export async function buildApp() {
     await app.register(transactionsRoutes, { prefix: '/api/transactions' });
     await app.register(settingsRoutes, { prefix: '/api/settings' });
     await app.register(depixRoutes, { prefix: '/api/depix' });
+    await app.register(notificationsRoutes, { prefix: '/api/notifications' });
 
     // Health check
     app.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));

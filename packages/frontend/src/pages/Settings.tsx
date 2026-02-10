@@ -31,13 +31,17 @@ export default function Settings() {
         telegramPhone: '',
         notifyEmail: false,
         notifyTelegram: true,
-        notifyMinAmount: 0,
+        notifyMinAmount: 0, // UI em R$ (ex: 100.00)
     });
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [testingDepix, setTestingDepix] = useState(false);
     const [depixStatus, setDepixStatus] = useState<'none' | 'success' | 'error'>('none');
+    const [pairingCode, setPairingCode] = useState<string>('');
+    const [pairingExpiresAt, setPairingExpiresAt] = useState<string>('');
+    const [adminsTelegram, setAdminsTelegram] = useState<Array<{ email: string; telegramLinked: boolean }>>([]);
+    const [telegramBotReady, setTelegramBotReady] = useState<boolean>(false);
 
     useEffect(() => {
         loadSettings();
@@ -46,19 +50,35 @@ export default function Settings() {
     const loadSettings = async () => {
         try {
             setLoading(true);
-            const response = await api.get('/settings');
+            const [settingsRes, adminsRes] = await Promise.all([
+                api.get('/settings'),
+                api.get('/notifications/admins'),
+            ]);
             // Converter taxas de decimal para porcentagem se necessário
             // O backend retorna como está no banco (pode ser 0.10 ou 10 dependendo da implementação)
             // Assumindo que o endpoint /settings retorna os dados crus
 
-            const data = response.data;
+            const data = settingsRes.data;
 
             // Ajuste para taxas se vierem em decimal
             if (data.defaultSplitRate < 1) data.defaultSplitRate *= 100;
             if (data.minSplitRate < 1) data.minSplitRate *= 100;
             if (data.maxSplitRate < 1) data.maxSplitRate *= 100;
 
+            // Notificações: backend usa centavos, UI usa R$
+            if (typeof data.notifyMinAmount === 'number') {
+                data.notifyMinAmount = data.notifyMinAmount / 100;
+            } else {
+                data.notifyMinAmount = 0;
+            }
+
             setFormData(data);
+
+            setTelegramBotReady(Boolean(adminsRes.data?.telegramBotReady));
+            setAdminsTelegram((adminsRes.data?.admins || []).map((a: any) => ({
+                email: a.email,
+                telegramLinked: Boolean(a.telegramLinked),
+            })));
         } catch (error) {
             console.error('Erro ao carregar configurações:', error);
             toast.error('Erro ao carregar configurações');
@@ -78,6 +98,7 @@ export default function Settings() {
                 defaultSplitRate: formData.defaultSplitRate / 100,
                 minSplitRate: formData.minSplitRate / 100,
                 maxSplitRate: formData.maxSplitRate / 100,
+                notifyMinAmount: Math.round((formData.notifyMinAmount || 0) * 100),
             };
 
             await api.put('/settings', payload);
@@ -87,6 +108,36 @@ export default function Settings() {
             toast.error('Erro ao salvar configurações');
         } finally {
             setSaving(false);
+        }
+    };
+
+    const handleGeneratePairingCode = async () => {
+        try {
+            const res = await api.post('/notifications/telegram/pairing-code');
+            setPairingCode(res.data.code);
+            setPairingExpiresAt(res.data.expiresAt);
+            toast.success('Código gerado. Envie /link CODIGO no bot admin.');
+        } catch (error) {
+            console.error('Erro ao gerar código Telegram:', error);
+            toast.error('Erro ao gerar código Telegram');
+        }
+    };
+
+    const handleTestEmail = async () => {
+        try {
+            await api.post('/notifications/test-email');
+            toast.success('Email de teste enviado!');
+        } catch (error: any) {
+            toast.error(error?.response?.data?.error || 'Falha ao enviar email de teste');
+        }
+    };
+
+    const handleTestTelegram = async () => {
+        try {
+            await api.post('/notifications/test-telegram');
+            toast.success('Telegram de teste enviado!');
+        } catch (error: any) {
+            toast.error(error?.response?.data?.error || 'Falha ao enviar Telegram de teste');
         }
     };
 
@@ -315,6 +366,86 @@ export default function Settings() {
                                 />
                                 <div className="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500"></div>
                             </label>
+                        </div>
+
+                        <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                            <label className="block text-sm font-medium text-gray-300 mb-2">
+                                Notificar apenas acima de (R$)
+                            </label>
+                            <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={formData.notifyMinAmount}
+                                onChange={(e) => setFormData({ ...formData, notifyMinAmount: parseFloat(e.target.value || '0') })}
+                                className="w-full bg-black/50 border border-zinc-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-violet-500 transition-colors"
+                            />
+                            <p className="text-xs text-gray-500 mt-2">
+                                Exemplo: 100,00 notifica apenas transações concluídas acima de R$ 100,00.
+                            </p>
+                        </div>
+
+                        <div className="p-4 bg-zinc-900/50 rounded-xl border border-zinc-800">
+                            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                                <div>
+                                    <p className="font-medium text-white">Vincular Telegram (Admins)</p>
+                                    <p className="text-sm text-gray-400">
+                                        {telegramBotReady ? 'Bot admin online.' : 'Bot admin offline (configure TELEGRAM_ADMIN_BOT_TOKEN).'}
+                                    </p>
+                                </div>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={handleGeneratePairingCode}
+                                        className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white rounded-lg transition-colors text-sm font-medium"
+                                    >
+                                        Gerar Código
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleTestTelegram}
+                                        className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/20 rounded-lg transition-colors text-sm font-medium"
+                                    >
+                                        Testar Telegram
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleTestEmail}
+                                        className="px-4 py-2 bg-orange-500/10 hover:bg-orange-500/20 text-orange-300 border border-orange-500/20 rounded-lg transition-colors text-sm font-medium"
+                                    >
+                                        Testar Email
+                                    </button>
+                                </div>
+                            </div>
+
+                            {pairingCode && (
+                                <div className="mt-4 p-4 bg-black/40 rounded-xl border border-violet-500/10">
+                                    <p className="text-sm text-gray-300">
+                                        Envie no bot admin: <span className="font-mono text-white">/link {pairingCode}</span>
+                                    </p>
+                                    {pairingExpiresAt && (
+                                        <p className="text-xs text-gray-500 mt-2">
+                                            Expira em: {new Date(pairingExpiresAt).toLocaleString('pt-BR')}
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {adminsTelegram.length > 0 && (
+                                <div className="mt-4">
+                                    <p className="text-xs text-gray-500 mb-2">Admins vinculados</p>
+                                    <div className="grid gap-2">
+                                        {adminsTelegram.map((a) => (
+                                            <div key={a.email} className="flex items-center justify-between text-sm">
+                                                <span className="text-gray-300">{a.email}</span>
+                                                <span className={a.telegramLinked ? 'text-emerald-400' : 'text-gray-500'}>
+                                                    {a.telegramLinked ? 'Vinculado' : 'Nao vinculado'}
+                                                </span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </section>

@@ -104,6 +104,11 @@ Altere:
 - As credenciais da Depix também podem ser configuradas via API/painel em `GET/PUT /api/settings` (recomendado).
 - Se você configurar por `.env`, reinicie o backend (`pm2 restart multbot-backend`) para aplicar.
 
+**Notificações (Admins):**
+- Telegram (bot admin separado): configure `TELEGRAM_ADMIN_BOT_TOKEN` no `.env` do backend.
+- Email (SMTP): configure `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM`.
+- Depois, no painel em **Configurações**, gere um código e envie `/link CODIGO` no bot admin para vincular o chat do admin.
+
 Salve com `Ctrl+O`, `Enter`, `Ctrl+X`
 
 Reinicie o backend:

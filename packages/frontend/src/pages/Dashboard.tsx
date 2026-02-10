@@ -37,7 +37,7 @@ export default function Dashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-  const adminName = localStorage.getItem('adminName') || 'Admin';
+  const adminName = 'Zydra';
 
   const loadData = async (isRefresh = false) => {
     try {

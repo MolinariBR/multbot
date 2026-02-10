@@ -13,8 +13,12 @@ model Admin {
   email     String   @unique
   password  String   // bcrypt hash
   name      String
+  telegramChatId String?
+  telegramLinkedAt DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  telegramPairings AdminTelegramPairing[]
 }
 
 // Bot Telegram de cada logista
@@ -76,4 +80,43 @@ model Settings {
   notifyTelegram      Boolean @default(false)
   notifyMinAmount     Int     @default(10000) // R$ 100,00 em centavos
   updatedAt           DateTime @updatedAt
+}
+
+// Admin-only notifications: event log + delivery log (for audit/retry)
+model NotificationEvent {
+  id        String   @id @default(cuid())
+  type      String
+  dedupeKey String?  @unique
+  payload   String   // JSON string
+  createdAt DateTime @default(now())
+
+  deliveries NotificationDelivery[]
+}
+
+model NotificationDelivery {
+  id        String   @id @default(cuid())
+  eventId   String
+  channel   String   // email | telegram
+  target    String   // email address or telegram chatId
+  status    String   @default("pending") // pending | sent | failed
+  attempts  Int      @default(0)
+  lastError String?
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  event NotificationEvent @relation(fields: [eventId], references: [id])
+
+  @@unique([eventId, channel, target])
+}
+
+model AdminTelegramPairing {
+  id        String   @id @default(cuid())
+  adminId   String
+  code      String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  admin Admin @relation(fields: [adminId], references: [id])
 }

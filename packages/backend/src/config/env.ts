@@ -28,6 +28,15 @@ const envSchema = z.object({
     TELEGRAM_API_ID: z.string().optional().or(z.literal('')),
     TELEGRAM_API_HASH: z.string().optional().or(z.literal('')),
     TELEGRAM_PHONE: z.string().optional().or(z.literal('')),
+
+    // Notifications (optional)
+    TELEGRAM_ADMIN_BOT_TOKEN: z.string().optional().or(z.literal('')),
+    SMTP_HOST: z.string().optional().or(z.literal('')),
+    SMTP_PORT: z.string().optional().or(z.literal('')),
+    SMTP_USER: z.string().optional().or(z.literal('')),
+    SMTP_PASS: z.string().optional().or(z.literal('')),
+    MAIL_FROM: z.string().optional().or(z.literal('')),
+    MAIL_TO_OVERRIDE: z.string().optional().or(z.literal('')),
 });
 
 const parsed = envSchema.safeParse(process.env);
