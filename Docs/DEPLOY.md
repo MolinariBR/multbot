@@ -100,6 +100,10 @@ Altere:
 - `DEPIX_API_KEY`: Sua chave da API Depix
 - `DEPIX_WEBHOOK_SECRET`: Seu secret do webhook Depix
 
+**Importante (Depix):**
+- As credenciais da Depix também podem ser configuradas via API/painel em `GET/PUT /api/settings` (recomendado).
+- Se você configurar por `.env`, reinicie o backend (`pm2 restart multbot-backend`) para aplicar.
+
 Salve com `Ctrl+O`, `Enter`, `Ctrl+X`
 
 Reinicie o backend:

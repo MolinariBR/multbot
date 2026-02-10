@@ -31,6 +31,9 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         }
 
         const settings = await settingsService.updateSettings(parsed.data);
+        // Recarrega config em runtime para evitar exigir restart após configurar credenciais.
+        const { depixService } = await import('../depix/depix.service.js');
+        await depixService.initialize();
         return reply.send(settings);
     });
 

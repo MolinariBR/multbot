@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { env } from '../../config/env.js';
 
 interface DepixPaymentRequest {
     amount: number; // em centavos
@@ -39,21 +40,32 @@ class DepixService {
             where: { id: 'settings' },
         });
 
-        if (!settings?.depixApiUrl || !settings?.depixApiKey) {
-            console.warn('⚠️  Depix não configurado. Configure em /api/settings');
+        // Prefer DB settings (editable from the dashboard), but allow env as a fallback.
+        // This avoids "Depix não está configurado" when ops configured only `.env`.
+        const apiUrl = settings?.depixApiUrl || env.DEPIX_API_URL || '';
+        const apiKey = settings?.depixApiKey || env.DEPIX_API_KEY || '';
+
+        if (!apiUrl || !apiKey) {
+            console.warn('⚠️  Depix não configurado. Configure em /api/settings (ou via .env)');
             return;
         }
 
-        this.apiUrl = settings.depixApiUrl;
-        this.apiKey = settings.depixApiKey;
+        this.apiUrl = apiUrl;
+        this.apiKey = apiKey;
 
         console.log('✅ Depix Service inicializado');
     }
 
-    async createPayment(request: DepixPaymentRequest): Promise<DepixPaymentResponse> {
+    private async ensureConfigured(): Promise<void> {
+        if (this.apiUrl && this.apiKey) return;
+        await this.initialize();
         if (!this.apiUrl || !this.apiKey) {
             throw new Error('Depix não está configurado');
         }
+    }
+
+    async createPayment(request: DepixPaymentRequest): Promise<DepixPaymentResponse> {
+        await this.ensureConfigured();
 
         try {
             const payload = {
@@ -105,9 +117,7 @@ class DepixService {
     }
 
     async getPaymentStatus(paymentId: string): Promise<DepixWebhookPayload> {
-        if (!this.apiUrl || !this.apiKey) {
-            throw new Error('Depix não está configurado');
-        }
+        await this.ensureConfigured();
 
         try {
             const response = await fetch(`${this.apiUrl}/deposit-status?id=${paymentId}`, {
@@ -230,9 +240,7 @@ class DepixService {
     }
 
     async sendToLiquidAddress(address: string, amountSats: number): Promise<string> {
-        if (!this.apiUrl || !this.apiKey) {
-            throw new Error('Depix não está configurado');
-        }
+        await this.ensureConfigured();
 
         try {
             // TODO: Implementar envio real via Depix
