@@ -1,4 +1,36 @@
 import { prisma } from '../../lib/prisma.js';
+import { env } from '../../config/env.js';
+import { telegramBotManager } from '../telegram/telegram-bot.service.js';
+
+export async function getPlatformStatus() {
+    const [activeBotsCount, settings] = await Promise.all([
+        prisma.bot.count({ where: { status: 'active' } }),
+        prisma.settings.findUnique({ where: { id: 'settings' } }),
+    ]);
+
+    const runningBotsCount = telegramBotManager.getAllBots().size;
+
+    // Depix can be configured either via Settings (DB) or via `.env` fallback.
+    const depixApiUrl = settings?.depixApiUrl || env.DEPIX_API_URL || '';
+    const depixApiKey = settings?.depixApiKey || env.DEPIX_API_KEY || '';
+    const depixConfigured = Boolean(depixApiUrl && depixApiKey);
+
+    const uptimeSec = Math.floor(process.uptime());
+
+    return {
+        apiOnline: true,
+        serverTime: new Date().toISOString(),
+        uptimeSec,
+        nodeVersion: process.version,
+        bots: {
+            activeConfigured: activeBotsCount,
+            running: runningBotsCount,
+        },
+        depix: {
+            configured: depixConfigured,
+        },
+    };
+}
 
 export async function getStats() {
     // Contar bots ativos

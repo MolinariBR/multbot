@@ -1,6 +1,7 @@
 import { useState, useEffect, ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Bot, History, Menu, X, Zap, LogOut, TrendingUp, Settings } from 'lucide-react'
+import { api } from '../lib/api'
 
 interface LayoutProps {
   children: ReactNode
@@ -30,21 +31,31 @@ export default function Layout({ children }: LayoutProps) {
   const isActive = (path: string) => location.pathname === path
 
   const [stats, setStats] = useState<{ botsCount: number; totalRevenue: number } | null>(null)
+  const [platformStatus, setPlatformStatus] = useState<{
+    apiOnline: boolean
+    uptimeSec: number
+    bots: { activeConfigured: number; running: number }
+    depix: { configured: boolean }
+  } | null>(null)
 
   useEffect(() => {
-    const fetchStats = async () => {
+    const fetchSidebarData = async () => {
       try {
-        const { data } = await import('../lib/api').then(m => m.api.get('/dashboard/stats'));
-        setStats(data);
+        const [statsRes, statusRes] = await Promise.all([
+          api.get('/dashboard/stats'),
+          api.get('/dashboard/platform-status'),
+        ])
+        setStats(statsRes.data)
+        setPlatformStatus(statusRes.data)
       } catch (error) {
         console.error('Erro ao buscar stats da sidebar:', error);
       }
     };
 
-    fetchStats();
+    fetchSidebarData();
 
     // Atualizar a cada 60 segundos
-    const interval = setInterval(fetchStats, 60000);
+    const interval = setInterval(fetchSidebarData, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -112,7 +123,7 @@ export default function Layout({ children }: LayoutProps) {
         </nav>
 
         {/* Platform Stats */}
-        {!collapsed && stats && (
+        {!collapsed && (
           <div className="px-4 pb-6">
             <div className="bg-gradient-to-br from-violet-500/10 to-fuchsia-500/10 rounded-xl p-4 border border-violet-500/20">
               <div className="flex items-center gap-2 mb-3">
@@ -121,17 +132,34 @@ export default function Layout({ children }: LayoutProps) {
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <span className="text-gray-400 text-xs">Bots Ativos</span>
-                  <span className="text-white font-bold text-sm">{stats.botsCount}</span>
+                  <span className="text-gray-400 text-xs">API</span>
+                  <span className="text-white font-bold text-sm">
+                    {platformStatus?.apiOnline ? 'Online' : 'Offline'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-xs">Bots (ativos/rodando)</span>
+                  <span className="text-white font-bold text-sm">
+                    {platformStatus ? `${platformStatus.bots.activeConfigured}/${platformStatus.bots.running}` : '--'}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-gray-400 text-xs">Depix</span>
+                  <span className={`font-bold text-sm ${platformStatus?.depix.configured ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {platformStatus ? (platformStatus.depix.configured ? 'Configurado' : 'Pendente') : '--'}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-400 text-xs">Volume Total</span>
                   <span className="text-emerald-400 font-bold text-sm">
-                    R$ {(stats.totalRevenue / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    R$ {(((stats?.totalRevenue ?? 0) / 100)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div className="w-full bg-black/50 rounded-full h-1.5 mt-3">
-                  <div className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-1.5 rounded-full animate-pulse" style={{ width: '100%' }} />
+                  <div
+                    className="bg-gradient-to-r from-violet-500 to-fuchsia-500 h-1.5 rounded-full animate-pulse"
+                    style={{ width: platformStatus?.apiOnline ? '100%' : '20%' }}
+                  />
                 </div>
               </div>
             </div>
