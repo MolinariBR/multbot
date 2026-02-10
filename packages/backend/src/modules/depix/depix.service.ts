@@ -207,6 +207,10 @@ class DepixService {
                 const { notifyTransactionCompleted } = await import('../notifications/notifications.service.js');
                 await notifyTransactionCompleted(updatedTransaction.id);
             }
+            if (payload.status === 'failed' && previousStatus !== 'failed') {
+                const { notifyTransactionFailed } = await import('../notifications/notifications.service.js');
+                await notifyTransactionFailed(updatedTransaction.id);
+            }
 
             // Se pagamento foi confirmado, processar confirmação
             if (payload.status === 'completed') {
