@@ -18,33 +18,57 @@ jobs:
     environment:
       name: ${{ 'staging' }}
     env:
-      VPS_HOST: ${{ secrets['VPS_HOST'] }}
-      VPS_USER: ${{ secrets['VPS_USER'] }}
-      VPS_SSH_KEY: ${{ secrets['VPS_SSH_KEY'] }}
-      VPS_PORT: ${{ secrets['VPS_PORT'] || '22' }}
+      HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Heroku and Vercel CLIs
+        run: npm install -g heroku vercel
+
       - name: Validate deploy secrets
         run: |
-          test -n "${{ env.VPS_HOST }}" || (echo "Missing secret: VPS_HOST" && exit 1)
-          test -n "${{ env.VPS_USER }}" || (echo "Missing secret: VPS_USER" && exit 1)
-          test -n "${{ env.VPS_SSH_KEY }}" || (echo "Missing secret: VPS_SSH_KEY" && exit 1)
+          test -n "${{ env.HEROKU_API_KEY }}" || (echo "Missing secret: HEROKU_API_KEY" && exit 1)
+          test -n "${{ env.HEROKU_APP_NAME }}" || (echo "Missing secret: HEROKU_APP_NAME" && exit 1)
+          test -n "${{ env.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
+          test -n "${{ env.VERCEL_ORG_ID }}" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
+          test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
 
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.VPS_HOST }}
-          username: ${{ env.VPS_USER }}
-          key: ${{ env.VPS_SSH_KEY }}
-          port: ${{ env.VPS_PORT }}
-          script: |
-            set -euo pipefail
-            cd /root/multbot
-            git fetch --all --prune
-            git checkout develop
-            git pull origin develop
-            chmod +x ./vps-update.sh
-            ./vps-update.sh
+      - name: Configure Heroku app environment
+        run: |
+          if [ -n "${{ env.FRONTEND_URL }}" ]; then
+            heroku config:set FRONTEND_URL="${{ env.FRONTEND_URL }}" --app "${{ env.HEROKU_APP_NAME }}"
+          fi
+
+      - name: Deploy backend to Heroku
+        run: |
+          git remote remove heroku 2>/dev/null || true
+          git remote add heroku "https://heroku:${{ env.HEROKU_API_KEY }}@git.heroku.com/${{ env.HEROKU_APP_NAME }}.git"
+          BACKEND_TREE_SHA="$(git subtree split --prefix packages/backend)"
+          git push heroku "${BACKEND_TREE_SHA}:main" --force
+
+      - name: Deploy frontend to Vercel (preview)
+        run: |
+          cd packages/frontend
+          export VITE_API_URL="https://${{ env.HEROKU_APP_NAME }}.herokuapp.com/api"
+          vercel pull --yes --environment=preview --token="${{ env.VERCEL_TOKEN }}"
+          vercel build --token="${{ env.VERCEL_TOKEN }}"
+          DEPLOYMENT_URL="$(vercel deploy --prebuilt --token="${{ env.VERCEL_TOKEN }}")"
+          echo "Frontend preview URL: ${DEPLOYMENT_URL}"
 
       - name: Open issue when deploy fails
         if: failure()
@@ -80,33 +104,57 @@ jobs:
     environment:
       name: ${{ 'production' }}
     env:
-      VPS_HOST: ${{ secrets['VPS_HOST'] }}
-      VPS_USER: ${{ secrets['VPS_USER'] }}
-      VPS_SSH_KEY: ${{ secrets['VPS_SSH_KEY'] }}
-      VPS_PORT: ${{ secrets['VPS_PORT'] || '22' }}
+      HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
+      HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
+      FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Heroku and Vercel CLIs
+        run: npm install -g heroku vercel
+
       - name: Validate deploy secrets
         run: |
-          test -n "${{ env.VPS_HOST }}" || (echo "Missing secret: VPS_HOST" && exit 1)
-          test -n "${{ env.VPS_USER }}" || (echo "Missing secret: VPS_USER" && exit 1)
-          test -n "${{ env.VPS_SSH_KEY }}" || (echo "Missing secret: VPS_SSH_KEY" && exit 1)
+          test -n "${{ env.HEROKU_API_KEY }}" || (echo "Missing secret: HEROKU_API_KEY" && exit 1)
+          test -n "${{ env.HEROKU_APP_NAME }}" || (echo "Missing secret: HEROKU_APP_NAME" && exit 1)
+          test -n "${{ env.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
+          test -n "${{ env.VERCEL_ORG_ID }}" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
+          test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
 
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.VPS_HOST }}
-          username: ${{ env.VPS_USER }}
-          key: ${{ env.VPS_SSH_KEY }}
-          port: ${{ env.VPS_PORT }}
-          script: |
-            set -euo pipefail
-            cd /root/multbot
-            git fetch --all --prune
-            git checkout main
-            git pull origin main
-            chmod +x ./vps-update.sh
-            ./vps-update.sh
+      - name: Configure Heroku app environment
+        run: |
+          if [ -n "${{ env.FRONTEND_URL }}" ]; then
+            heroku config:set FRONTEND_URL="${{ env.FRONTEND_URL }}" --app "${{ env.HEROKU_APP_NAME }}"
+          fi
+
+      - name: Deploy backend to Heroku
+        run: |
+          git remote remove heroku 2>/dev/null || true
+          git remote add heroku "https://heroku:${{ env.HEROKU_API_KEY }}@git.heroku.com/${{ env.HEROKU_APP_NAME }}.git"
+          BACKEND_TREE_SHA="$(git subtree split --prefix packages/backend)"
+          git push heroku "${BACKEND_TREE_SHA}:main" --force
+
+      - name: Deploy frontend to Vercel (production)
+        run: |
+          cd packages/frontend
+          export VITE_API_URL="https://${{ env.HEROKU_APP_NAME }}.herokuapp.com/api"
+          vercel pull --yes --environment=production --token="${{ env.VERCEL_TOKEN }}"
+          vercel build --prod --token="${{ env.VERCEL_TOKEN }}"
+          DEPLOYMENT_URL="$(vercel deploy --prebuilt --prod --token="${{ env.VERCEL_TOKEN }}")"
+          echo "Frontend production URL: ${DEPLOYMENT_URL}"
 
       - name: Open issue when deploy fails
         if: failure()
