@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate Prisma client
+        run: pnpm --filter @multbot/backend exec prisma generate
+
       - name: Run backend tests if present
         run: pnpm --filter @multbot/backend run test --if-present
 
