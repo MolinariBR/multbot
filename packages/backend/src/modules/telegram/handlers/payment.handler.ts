@@ -1,8 +1,13 @@
 import type TelegramBot from 'node-telegram-bot-api';
 import { prisma } from '../../../lib/prisma.js';
 import { depixService } from '../../depix/depix.service.js';
-import { generateQRCodeBuffer } from '../utils/qrcode.js';
 import { messages, formatBRL, formatExpiration } from '../utils/messages.js';
+import { generateQRCodeBuffer } from '../utils/qrcode.js';
+
+const TRANSACTION_STATUS_PROCESSING = 'processing';
+const TRANSACTION_STATUS_COMPLETED = 'completed';
+const TRANSACTION_STATUS_FAILED = 'failed';
+const MARKDOWN_PARSE_MODE = 'Markdown';
 
 interface PaymentContext {
     botId: string;
@@ -11,195 +16,281 @@ interface PaymentContext {
     amountInCents: number;
     botConfig: {
         name: string;
-        ownerName: string;
-        depixAddress: string;
         splitRate: number;
     };
 }
 
-/**
- * Processa pagamento completo
- */
-export async function processPayment(
-    bot: TelegramBot,
-    context: PaymentContext
+interface ExpirationCheckInput {
+    telegramBot: TelegramBot;
+    chatId: number;
+    transactionId: string;
+    expiresAt: Date;
+}
+
+function getErrorMessage(error: unknown, fallbackMessage: string): string {
+    return error instanceof Error && error.message ? error.message : fallbackMessage;
+}
+
+function parseTelegramChatId(telegramUserId: string | null): number | null {
+    if (!telegramUserId) {
+        return null;
+    }
+
+    const chatId = Number(telegramUserId);
+    return Number.isInteger(chatId) ? chatId : null;
+}
+
+async function createDepixPayment(context: PaymentContext) {
+    return depixService.createPayment({
+        amount: context.amountInCents,
+        description: `Pagamento via ${context.botConfig.name}`,
+        customerName: `Telegram User ${context.userId}`,
+        userId: context.userId,
+    });
+}
+
+async function createProcessingTransaction(
+    context: PaymentContext,
+    depixPaymentId: string,
+    pixKey: string,
+    splitRate: number,
+): Promise<{ id: string }> {
+    const paymentSplit = depixService.calculateSplit(context.amountInCents, splitRate);
+
+    return prisma.transaction.create({
+        data: {
+            botId: context.botId,
+            telegramUserId: String(context.userId),
+            depixPaymentId,
+            amountBrl: context.amountInCents,
+            depixAmount: 0,
+            merchantSplit: paymentSplit.merchantSplit,
+            adminSplit: paymentSplit.adminSplit,
+            pixKey,
+            status: TRANSACTION_STATUS_PROCESSING,
+        },
+        select: { id: true },
+    });
+}
+
+async function sendPaymentQrCode(
+    telegramBot: TelegramBot,
+    chatId: number,
+    amountInCents: number,
+    pixKey: string,
+    expiresAt: string,
 ): Promise<void> {
-    const { botId, chatId, userId, amountInCents, botConfig } = context;
+    const qrCodeBuffer = await generateQRCodeBuffer(pixKey);
 
+    await telegramBot.sendPhoto(chatId, qrCodeBuffer, {
+        caption: messages.paymentGenerated(
+            formatBRL(amountInCents),
+            pixKey,
+            formatExpiration(expiresAt),
+        ),
+        parse_mode: MARKDOWN_PARSE_MODE,
+    });
+}
+
+async function markTransactionAsCompleted(
+    transactionId: string,
+    depixAmount: number,
+    blockchainTransactionId?: string,
+): Promise<void> {
+    await prisma.transaction.update({
+        where: { id: transactionId },
+        data: {
+            status: TRANSACTION_STATUS_COMPLETED,
+            depixAmount,
+            completedAt: new Date(),
+            blockchainTxId: blockchainTransactionId,
+        },
+    });
+}
+
+async function notifyPaymentConfirmation(
+    telegramBot: TelegramBot,
+    transaction: {
+        id: string;
+        amountBrl: number;
+        telegramUserId: string | null;
+    },
+): Promise<void> {
+    const chatId = parseTelegramChatId(transaction.telegramUserId);
+    if (!chatId) {
+        return;
+    }
+
+    await telegramBot.sendMessage(
+        chatId,
+        messages.paymentConfirmed(formatBRL(transaction.amountBrl), transaction.id),
+        { parse_mode: MARKDOWN_PARSE_MODE },
+    );
+}
+
+async function expireProcessingTransaction(
+    telegramBot: TelegramBot,
+    chatId: number,
+    transactionId: string,
+): Promise<void> {
+    const transaction = await prisma.transaction.findUnique({
+        where: { id: transactionId },
+        select: { status: true },
+    });
+
+    if (!transaction || transaction.status !== TRANSACTION_STATUS_PROCESSING) {
+        return;
+    }
+
+    await prisma.transaction.update({
+        where: { id: transactionId },
+        data: { status: TRANSACTION_STATUS_FAILED },
+    });
+
+    await telegramBot.sendMessage(chatId, messages.paymentExpired(), {
+        parse_mode: MARKDOWN_PARSE_MODE,
+    });
+}
+
+function scheduleExpirationCheck(input: ExpirationCheckInput): void {
+    const millisecondsUntilExpiration = input.expiresAt.getTime() - Date.now();
+    if (millisecondsUntilExpiration <= 0) {
+        return;
+    }
+
+    const timer = setTimeout(async () => {
+        try {
+            await expireProcessingTransaction(input.telegramBot, input.chatId, input.transactionId);
+        } catch (error: unknown) {
+            const errorMessage = getErrorMessage(error, 'erro desconhecido');
+            console.error('Erro ao verificar expiração do pagamento', {
+                transactionId: input.transactionId,
+                chatId: input.chatId,
+                error: errorMessage,
+            });
+        }
+    }, millisecondsUntilExpiration);
+
+    timer.unref?.();
+}
+
+export async function processPayment(
+    telegramBot: TelegramBot,
+    context: PaymentContext,
+): Promise<void> {
     try {
-        // 1. Enviar mensagem de processamento
-        await bot.sendMessage(chatId, messages.processing());
-
-        // 2. Criar pagamento na Depix
-        const depixPayment = await depixService.createPayment({
-            amount: amountInCents,
-            description: `Pagamento via ${botConfig.name}`,
-            customerName: `Telegram User ${userId}`,
-            userId: userId,
+        await telegramBot.sendMessage(context.chatId, messages.processing(), {
+            parse_mode: MARKDOWN_PARSE_MODE,
         });
 
-        // 3. Calcular split
-        const split = await depixService.calculateSplit(amountInCents, botConfig.splitRate);
-
-        // 4. Criar transação no banco
-        const transaction = await prisma.transaction.create({
-            data: {
-                botId,
-                telegramUserId: userId.toString(),
-                depixPaymentId: depixPayment.paymentId,
-                amountBrl: amountInCents,
-                depixAmount: 0, // Será atualizado quando o pagamento for confirmado
-                merchantSplit: split.merchantSplit,
-                adminSplit: split.adminSplit,
-                pixKey: depixPayment.pixKey,
-                status: 'processing',
-            },
-        });
-
-        // 5. Gerar QR Code
-        const qrCodeBuffer = await generateQRCodeBuffer(depixPayment.pixKey);
-
-        // 6. Enviar QR Code para o usuário
-        await bot.sendPhoto(chatId, qrCodeBuffer, {
-            caption: messages.paymentGenerated(
-                formatBRL(amountInCents),
-                depixPayment.pixKey,
-                formatExpiration(depixPayment.expiresAt)
-            ),
-            parse_mode: 'Markdown',
-        });
-
-        console.log(`✅ Pagamento criado: ${transaction.id} - ${formatBRL(amountInCents)}`);
-
-        // 7. Iniciar monitoramento de expiração (opcional)
-        scheduleExpirationCheck(bot, chatId, transaction.id, new Date(depixPayment.expiresAt));
-
-    } catch (error: any) {
-        console.error('❌ Erro ao processar pagamento:', error);
-
-        // Enviar mensagem de erro ao usuário
-        await bot.sendMessage(
-            chatId,
-            messages.error(error.message || 'Erro ao gerar pagamento. Tente novamente.')
+        const depixPayment = await createDepixPayment(context);
+        const transaction = await createProcessingTransaction(
+            context,
+            depixPayment.paymentId,
+            depixPayment.pixKey,
+            context.botConfig.splitRate,
         );
+
+        await sendPaymentQrCode(
+            telegramBot,
+            context.chatId,
+            context.amountInCents,
+            depixPayment.pixKey,
+            depixPayment.expiresAt,
+        );
+
+        console.log(`✅ Pagamento criado: ${transaction.id} - ${formatBRL(context.amountInCents)}`);
+
+        scheduleExpirationCheck({
+            telegramBot,
+            chatId: context.chatId,
+            transactionId: transaction.id,
+            expiresAt: new Date(depixPayment.expiresAt),
+        });
+    } catch (error: unknown) {
+        const errorMessage = getErrorMessage(error, 'Erro ao gerar pagamento. Tente novamente.');
+        console.error('Erro ao processar pagamento', {
+            botId: context.botId,
+            chatId: context.chatId,
+            userId: context.userId,
+            error: errorMessage,
+        });
+
+        await telegramBot.sendMessage(context.chatId, messages.error(errorMessage), {
+            parse_mode: MARKDOWN_PARSE_MODE,
+        });
     }
 }
 
-/**
- * Agenda verificação de expiração do pagamento
- */
-function scheduleExpirationCheck(
-    bot: TelegramBot,
-    chatId: number,
-    transactionId: string,
-    expiresAt: Date
-): void {
-    const now = new Date();
-    const timeUntilExpiration = expiresAt.getTime() - now.getTime();
-
-    // Se já expirou, não agendar
-    if (timeUntilExpiration <= 0) return;
-
-    // Agendar notificação de expiração
-    setTimeout(async () => {
-        try {
-            // Verificar se o pagamento ainda está pendente
-            const transaction = await prisma.transaction.findUnique({
-                where: { id: transactionId },
-            });
-
-            if (transaction && transaction.status === 'processing') {
-                // Atualizar status para failed
-                await prisma.transaction.update({
-                    where: { id: transactionId },
-                    data: { status: 'failed' },
-                });
-
-                // Notificar usuário
-                await bot.sendMessage(chatId, messages.paymentExpired());
-            }
-        } catch (error) {
-            console.error('Erro ao verificar expiração:', error);
-        }
-    }, timeUntilExpiration);
-}
-
-/**
- * Processa confirmação de pagamento (chamado pelo webhook)
- */
 export async function handlePaymentConfirmation(
-    bot: TelegramBot,
+    telegramBot: TelegramBot,
     transactionId: string,
     depixAmount: number,
-    txId?: string
+    blockchainTransactionId?: string,
 ): Promise<void> {
     try {
-        // 1. Buscar transação
         const transaction = await prisma.transaction.findUnique({
             where: { id: transactionId },
-            include: { bot: true },
+            select: {
+                id: true,
+                amountBrl: true,
+                status: true,
+                depixAmount: true,
+                blockchainTxId: true,
+                telegramUserId: true,
+            },
         });
 
         if (!transaction) {
-            console.error(`Transação ${transactionId} não encontrada`);
+            console.warn(`Transação ${transactionId} não encontrada ao confirmar pagamento`);
             return;
         }
 
-        // 2. Atualizar transação
-        await prisma.transaction.update({
-            where: { id: transactionId },
-            data: {
-                status: 'completed',
-                depixAmount,
-                completedAt: new Date(),
-            },
-        });
+        const shouldUpdateTransaction = (
+            transaction.status !== TRANSACTION_STATUS_COMPLETED
+            || transaction.depixAmount !== depixAmount
+            || (Boolean(blockchainTransactionId) && !transaction.blockchainTxId)
+        );
 
-        // 3. Processar split e enviar para merchant
-        // TODO: Implementar envio de L-BTC para o endereço do merchant
-        // await depixService.sendToLiquidAddress(
-        //     transaction.bot.depixAddress,
-        //     transaction.merchantSplit
-        // );
+        if (shouldUpdateTransaction) {
+            await markTransactionAsCompleted(transaction.id, depixAmount, blockchainTransactionId);
+        }
 
-        // 4. Notificar usuário via Telegram
-        // TODO: Recuperar chatId do usuário (precisa salvar no banco)
-        // await bot.sendMessage(
-        //     chatId,
-        //     messages.paymentConfirmed(
-        //         formatBRL(transaction.amountBrl),
-        //         transaction.id
-        //     )
-        // );
-
+        await notifyPaymentConfirmation(telegramBot, transaction);
         console.log(`✅ Pagamento confirmado: ${transactionId}`);
-
-    } catch (error) {
-        console.error('❌ Erro ao processar confirmação:', error);
+    } catch (error: unknown) {
+        const errorMessage = getErrorMessage(error, 'erro desconhecido');
+        console.error('Erro ao processar confirmação de pagamento', {
+            transactionId,
+            depixAmount,
+            blockchainTransactionId,
+            error: errorMessage,
+        });
     }
 }
 
-/**
- * Cancela pagamento
- */
 export async function cancelPayment(
-    bot: TelegramBot,
+    telegramBot: TelegramBot,
     chatId: number,
-    transactionId: string
+    transactionId: string,
 ): Promise<void> {
     try {
-        // Atualizar status
         await prisma.transaction.update({
             where: { id: transactionId },
-            data: { status: 'failed' },
+            data: { status: TRANSACTION_STATUS_FAILED },
         });
 
-        // Notificar usuário
-        await bot.sendMessage(chatId, messages.paymentCancelled());
+        await telegramBot.sendMessage(chatId, messages.paymentCancelled(), {
+            parse_mode: MARKDOWN_PARSE_MODE,
+        });
 
         console.log(`❌ Pagamento cancelado: ${transactionId}`);
-
-    } catch (error) {
-        console.error('Erro ao cancelar pagamento:', error);
+    } catch (error: unknown) {
+        const errorMessage = getErrorMessage(error, 'erro desconhecido');
+        console.error('Erro ao cancelar pagamento', {
+            transactionId,
+            chatId,
+            error: errorMessage,
+        });
     }
 }

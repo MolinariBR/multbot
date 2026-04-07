@@ -1,8 +1,13 @@
-import type { InlineKeyboardMarkup, ReplyKeyboardMarkup } from 'node-telegram-bot-api';
+import type {
+    InlineKeyboardMarkup,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+} from 'node-telegram-bot-api';
 
-/**
- * Keyboard principal com opções do menu
- */
+const CALLBACK_ACTION_CONFIRM_PREFIX = 'confirm_';
+const CALLBACK_ACTION_CANCEL_PREFIX = 'cancel_';
+const CALLBACK_BACK_TO_MENU = 'back_to_menu';
+
 export const mainKeyboard: ReplyKeyboardMarkup = {
     keyboard: [
         [
@@ -18,34 +23,31 @@ export const mainKeyboard: ReplyKeyboardMarkup = {
     one_time_keyboard: false,
 };
 
-/**
- * Keyboard inline para confirmação
- */
-export function confirmationKeyboard(actionId: string): InlineKeyboardMarkup {
+export function confirmationKeyboard(actionIdentifier: string): InlineKeyboardMarkup {
     return {
         inline_keyboard: [
             [
-                { text: '✅ Confirmar', callback_data: `confirm_${actionId}` },
-                { text: '❌ Cancelar', callback_data: `cancel_${actionId}` },
+                {
+                    text: '✅ Confirmar',
+                    callback_data: `${CALLBACK_ACTION_CONFIRM_PREFIX}${actionIdentifier}`,
+                },
+                {
+                    text: '❌ Cancelar',
+                    callback_data: `${CALLBACK_ACTION_CANCEL_PREFIX}${actionIdentifier}`,
+                },
             ],
         ],
     };
 }
 
-/**
- * Keyboard inline para voltar ao menu
- */
 export const backToMenuKeyboard: InlineKeyboardMarkup = {
     inline_keyboard: [
         [
-            { text: '🏠 Voltar ao Menu', callback_data: 'back_to_menu' },
+            { text: '🏠 Voltar ao Menu', callback_data: CALLBACK_BACK_TO_MENU },
         ],
     ],
 };
 
-/**
- * Remove keyboard (esconde teclado customizado)
- */
-export const removeKeyboard = {
+export const removeKeyboard: ReplyKeyboardRemove = {
     remove_keyboard: true,
 };

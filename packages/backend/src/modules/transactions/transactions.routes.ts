@@ -1,68 +1,98 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { listTransactionsQuerySchema } from './transactions.schema.js';
-import * as transactionsService from './transactions.service.js';
+import { ValidationError } from '../../lib/error.js';
+import {
+    exportTransactions,
+    getTransaction,
+    listTransactions,
+} from './transactions.service.js';
+import {
+    listTransactionsQueryJsonSchema,
+    listTransactionsQuerySchema,
+    toExportTransactionsQuery,
+    transactionIdParamsJsonSchema,
+    transactionIdParamsSchema,
+} from './transactions.schema.js';
+
+function normalizeFieldErrors(
+    fieldErrors: Record<string, string[] | undefined>,
+): Record<string, string[]> {
+    return Object.fromEntries(
+        Object.entries(fieldErrors).map(([field, errors]) => [field, errors ?? []]),
+    );
+}
+
+function parseQueryOrThrow(query: unknown) {
+    const parsedQuery = listTransactionsQuerySchema.safeParse(query);
+    if (parsedQuery.success) {
+        return parsedQuery.data;
+    }
+
+    throw new ValidationError(
+        'Dados inválidos',
+        normalizeFieldErrors(parsedQuery.error.flatten().fieldErrors),
+    );
+}
+
+function parseTransactionParamsOrThrow(params: unknown): { id: string } {
+    const parsedParams = transactionIdParamsSchema.safeParse(params);
+    if (parsedParams.success) {
+        return parsedParams.data;
+    }
+
+    throw new ValidationError(
+        'Parâmetros inválidos',
+        normalizeFieldErrors(parsedParams.error.flatten().fieldErrors),
+    );
+}
+
+function buildExportFileName(date: Date): string {
+    const dateString = date.toISOString().split('T')[0];
+    return `transactions_${dateString}.csv`;
+}
 
 export const transactionsRoutes: FastifyPluginAsync = async (app) => {
-    // GET /api/transactions
     app.get('/', {
         schema: {
             tags: ['Transactions'],
             summary: 'Listar transações',
             security: [{ bearerAuth: [] }],
-            querystring: {
-                type: 'object',
-                properties: {
-                    page: { type: 'string' },
-                    limit: { type: 'string' },
-                    status: { type: 'string', enum: ['processing', 'completed', 'failed'] },
-                    botId: { type: 'string' },
-                    search: { type: 'string' },
-                    dateFrom: { type: 'string', format: 'date' },
-                    dateTo: { type: 'string', format: 'date' },
-                    sortBy: { type: 'string', enum: ['createdAt', 'amountBrl', 'status'] },
-                    sortOrder: { type: 'string', enum: ['asc', 'desc'] },
-                },
-            },
+            querystring: listTransactionsQueryJsonSchema,
         },
     }, async (request, reply) => {
-        const query = listTransactionsQuerySchema.parse(request.query);
-        const result = await transactionsService.listTransactions(query);
+        const query = parseQueryOrThrow(request.query);
+        const result = await listTransactions(query);
         return reply.send(result);
     });
 
-    // GET /api/transactions/export
     app.get('/export', {
         schema: {
             tags: ['Transactions'],
             summary: 'Exportar transações CSV',
             security: [{ bearerAuth: [] }],
+            querystring: listTransactionsQueryJsonSchema,
         },
     }, async (request, reply) => {
-        const query = listTransactionsQuerySchema.parse(request.query);
-        const csv = await transactionsService.exportTransactions(query);
+        const listQuery = parseQueryOrThrow(request.query);
+        const exportQuery = toExportTransactionsQuery(listQuery);
+        const csv = await exportTransactions(exportQuery);
+        const filename = buildExportFileName(new Date());
 
-        const date = new Date().toISOString().split('T')[0];
         return reply
             .header('Content-Type', 'text/csv')
-            .header('Content-Disposition', `attachment; filename="transactions_${date}.csv"`)
+            .header('Content-Disposition', `attachment; filename="${filename}"`)
             .send(csv);
     });
 
-    // GET /api/transactions/:id
     app.get('/:id', {
         schema: {
             tags: ['Transactions'],
             summary: 'Detalhes de uma transação',
             security: [{ bearerAuth: [] }],
-            params: {
-                type: 'object',
-                properties: { id: { type: 'string' } },
-                required: ['id'],
-            },
+            params: transactionIdParamsJsonSchema,
         },
     }, async (request, reply) => {
-        const { id } = request.params as { id: string };
-        const transaction = await transactionsService.getTransaction(id);
+        const { id } = parseTransactionParamsOrThrow(request.params);
+        const transaction = await getTransaction(id);
         return reply.send(transaction);
     });
 };
