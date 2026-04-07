@@ -11,8 +11,8 @@ permissions:
   issues: write
 
 jobs:
-  deploy-staging:
-    name: Deploy Staging (develop)
+  deploy-backend-staging:
+    name: Deploy Backend Staging (develop)
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }}
     runs-on: ubuntu-latest
     environment:
@@ -21,9 +21,6 @@ jobs:
       HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
       HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
       FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
       - name: Checkout
@@ -37,19 +34,17 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Heroku and Vercel CLIs
-        run: npm install -g heroku vercel
+      - name: Install Heroku CLI
+        run: npm install -g heroku
 
       - name: Validate deploy secrets
         run: |
           test -n "${{ env.HEROKU_API_KEY }}" || (echo "Missing secret: HEROKU_API_KEY" && exit 1)
           test -n "${{ env.HEROKU_APP_NAME }}" || (echo "Missing secret: HEROKU_APP_NAME" && exit 1)
-          test -n "${{ env.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
-          test -n "${{ env.VERCEL_ORG_ID }}" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
-          test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
 
-      - name: Configure Heroku app environment
+      - name: Configure Heroku environment
         run: |
+          heroku config:set NODE_ENV=production HOST=0.0.0.0 --app "${{ env.HEROKU_APP_NAME }}"
           if [ -n "${{ env.FRONTEND_URL }}" ]; then
             heroku config:set FRONTEND_URL="${{ env.FRONTEND_URL }}" --app "${{ env.HEROKU_APP_NAME }}"
           fi
@@ -60,26 +55,18 @@ jobs:
           git remote add heroku "https://heroku:${{ env.HEROKU_API_KEY }}@git.heroku.com/${{ env.HEROKU_APP_NAME }}.git"
           BACKEND_TREE_SHA="$(git subtree split --prefix packages/backend)"
           git push heroku "${BACKEND_TREE_SHA}:main" --force
+          heroku ps:scale web=1 --app "${{ env.HEROKU_APP_NAME }}"
 
-      - name: Deploy frontend to Vercel (preview)
-        run: |
-          cd packages/frontend
-          export VITE_API_URL="https://${{ env.HEROKU_APP_NAME }}.herokuapp.com/api"
-          vercel pull --yes --environment=preview --token="${{ env.VERCEL_TOKEN }}"
-          vercel build --token="${{ env.VERCEL_TOKEN }}"
-          DEPLOYMENT_URL="$(vercel deploy --prebuilt --token="${{ env.VERCEL_TOKEN }}")"
-          echo "Frontend preview URL: ${DEPLOYMENT_URL}"
-
-      - name: Open issue when deploy fails
+      - name: Open issue when backend deploy fails
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const buildRunUrl = context.payload.workflow_run?.html_url ?? 'N/A';
-            const title = `[CI/CD] Deploy staging falhou (${context.payload.workflow_run?.head_sha?.slice(0, 7) ?? 'unknown'})`;
+            const title = `[CI/CD] Backend deploy staging falhou (${context.payload.workflow_run?.head_sha?.slice(0, 7) ?? 'unknown'})`;
             const body = [
-              '## Falha no Deploy (staging)',
+              '## Falha no Deploy de Backend (staging)',
               '',
               '- Branch: `develop`',
               `- SHA: \`${context.payload.workflow_run?.head_sha ?? 'unknown'}\``,
@@ -94,11 +81,80 @@ jobs:
               repo: context.repo.repo,
               title,
               body,
-              labels: ['ci', 'deploy-failure', 'staging'],
+              labels: ['ci', 'deploy-failure', 'staging', 'backend'],
             });
 
-  deploy-production:
-    name: Deploy Production (main)
+  deploy-frontend-staging:
+    name: Deploy Frontend Staging (develop)
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'develop' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ 'staging' }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      BACKEND_API_URL: ${{ secrets.BACKEND_API_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Validate deploy secrets
+        run: |
+          test -n "${{ env.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
+          test -n "${{ env.VERCEL_ORG_ID }}" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
+          test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
+          test -n "${{ env.BACKEND_API_URL }}" || (echo "Missing secret: BACKEND_API_URL" && exit 1)
+
+      - name: Deploy frontend to Vercel preview
+        run: |
+          cd packages/frontend
+          export VITE_API_URL="${{ env.BACKEND_API_URL }}"
+          vercel pull --yes --environment=preview --token="${{ env.VERCEL_TOKEN }}"
+          vercel build --token="${{ env.VERCEL_TOKEN }}"
+          DEPLOYMENT_URL="$(vercel deploy --prebuilt --token="${{ env.VERCEL_TOKEN }}")"
+          echo "Frontend preview URL: ${DEPLOYMENT_URL}"
+
+      - name: Open issue when frontend deploy fails
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const buildRunUrl = context.payload.workflow_run?.html_url ?? 'N/A';
+            const title = `[CI/CD] Frontend deploy staging falhou (${context.payload.workflow_run?.head_sha?.slice(0, 7) ?? 'unknown'})`;
+            const body = [
+              '## Falha no Deploy de Frontend (staging)',
+              '',
+              '- Branch: `develop`',
+              `- SHA: \`${context.payload.workflow_run?.head_sha ?? 'unknown'}\``,
+              `- Build upstream: ${buildRunUrl}`,
+              `- Run com falha: ${runUrl}`,
+              '',
+              'Verifique os logs do workflow para detalhes do erro.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ci', 'deploy-failure', 'staging', 'frontend'],
+            });
+
+  deploy-backend-production:
+    name: Deploy Backend Production (main)
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
     runs-on: ubuntu-latest
     environment:
@@ -107,9 +163,6 @@ jobs:
       HEROKU_API_KEY: ${{ secrets.HEROKU_API_KEY }}
       HEROKU_APP_NAME: ${{ secrets.HEROKU_APP_NAME }}
       FRONTEND_URL: ${{ secrets.FRONTEND_URL }}
-      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
     steps:
       - name: Checkout
@@ -123,19 +176,17 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Heroku and Vercel CLIs
-        run: npm install -g heroku vercel
+      - name: Install Heroku CLI
+        run: npm install -g heroku
 
       - name: Validate deploy secrets
         run: |
           test -n "${{ env.HEROKU_API_KEY }}" || (echo "Missing secret: HEROKU_API_KEY" && exit 1)
           test -n "${{ env.HEROKU_APP_NAME }}" || (echo "Missing secret: HEROKU_APP_NAME" && exit 1)
-          test -n "${{ env.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
-          test -n "${{ env.VERCEL_ORG_ID }}" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
-          test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
 
-      - name: Configure Heroku app environment
+      - name: Configure Heroku environment
         run: |
+          heroku config:set NODE_ENV=production HOST=0.0.0.0 --app "${{ env.HEROKU_APP_NAME }}"
           if [ -n "${{ env.FRONTEND_URL }}" ]; then
             heroku config:set FRONTEND_URL="${{ env.FRONTEND_URL }}" --app "${{ env.HEROKU_APP_NAME }}"
           fi
@@ -146,26 +197,18 @@ jobs:
           git remote add heroku "https://heroku:${{ env.HEROKU_API_KEY }}@git.heroku.com/${{ env.HEROKU_APP_NAME }}.git"
           BACKEND_TREE_SHA="$(git subtree split --prefix packages/backend)"
           git push heroku "${BACKEND_TREE_SHA}:main" --force
+          heroku ps:scale web=1 --app "${{ env.HEROKU_APP_NAME }}"
 
-      - name: Deploy frontend to Vercel (production)
-        run: |
-          cd packages/frontend
-          export VITE_API_URL="https://${{ env.HEROKU_APP_NAME }}.herokuapp.com/api"
-          vercel pull --yes --environment=production --token="${{ env.VERCEL_TOKEN }}"
-          vercel build --prod --token="${{ env.VERCEL_TOKEN }}"
-          DEPLOYMENT_URL="$(vercel deploy --prebuilt --prod --token="${{ env.VERCEL_TOKEN }}")"
-          echo "Frontend production URL: ${DEPLOYMENT_URL}"
-
-      - name: Open issue when deploy fails
+      - name: Open issue when backend deploy fails
         if: failure()
         uses: actions/github-script@v7
         with:
           script: |
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const buildRunUrl = context.payload.workflow_run?.html_url ?? 'N/A';
-            const title = `[CI/CD] Deploy production falhou (${context.payload.workflow_run?.head_sha?.slice(0, 7) ?? 'unknown'})`;
+            const title = `[CI/CD] Backend deploy production falhou (${context.payload.workflow_run?.head_sha?.slice(0, 7) ?? 'unknown'})`;
             const body = [
-              '## Falha no Deploy (production)',
+              '## Falha no Deploy de Backend (production)',
               '',
               '- Branch: `main`',
               `- SHA: \`${context.payload.workflow_run?.head_sha ?? 'unknown'}\``,
@@ -180,5 +223,74 @@ jobs:
               repo: context.repo.repo,
               title,
               body,
-              labels: ['ci', 'deploy-failure', 'production'],
+              labels: ['ci', 'deploy-failure', 'production', 'backend'],
+            });
+
+  deploy-frontend-production:
+    name: Deploy Frontend Production (main)
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ 'production' }}
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      BACKEND_API_URL: ${{ secrets.BACKEND_API_URL }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel
+
+      - name: Validate deploy secrets
+        run: |
+          test -n "${{ env.VERCEL_TOKEN }}" || (echo "Missing secret: VERCEL_TOKEN" && exit 1)
+          test -n "${{ env.VERCEL_ORG_ID }}" || (echo "Missing secret: VERCEL_ORG_ID" && exit 1)
+          test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
+          test -n "${{ env.BACKEND_API_URL }}" || (echo "Missing secret: BACKEND_API_URL" && exit 1)
+
+      - name: Deploy frontend to Vercel production
+        run: |
+          cd packages/frontend
+          export VITE_API_URL="${{ env.BACKEND_API_URL }}"
+          vercel pull --yes --environment=production --token="${{ env.VERCEL_TOKEN }}"
+          vercel build --prod --token="${{ env.VERCEL_TOKEN }}"
+          DEPLOYMENT_URL="$(vercel deploy --prebuilt --prod --token="${{ env.VERCEL_TOKEN }}")"
+          echo "Frontend production URL: ${DEPLOYMENT_URL}"
+
+      - name: Open issue when frontend deploy fails
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const buildRunUrl = context.payload.workflow_run?.html_url ?? 'N/A';
+            const title = `[CI/CD] Frontend deploy production falhou (${context.payload.workflow_run?.head_sha?.slice(0, 7) ?? 'unknown'})`;
+            const body = [
+              '## Falha no Deploy de Frontend (production)',
+              '',
+              '- Branch: `main`',
+              `- SHA: \`${context.payload.workflow_run?.head_sha ?? 'unknown'}\``,
+              `- Build upstream: ${buildRunUrl}`,
+              `- Run com falha: ${runUrl}`,
+              '',
+              'Verifique os logs do workflow para detalhes do erro.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['ci', 'deploy-failure', 'production', 'frontend'],
             });
