@@ -1,13 +1,18 @@
 import type { FastifyCorsOptions } from '@fastify/cors';
 import { env } from './env.js';
 
+const isProductionEnvironment = env.NODE_ENV === 'production';
+const productionAllowedOrigins = [
+    'https://multbot.com',
+    'https://mullttibot.duckdns.org',
+];
+
+const corsOrigin: FastifyCorsOptions['origin'] = isProductionEnvironment
+    ? productionAllowedOrigins
+    : true;
+
 export const corsOptions: FastifyCorsOptions = {
-    origin: env.NODE_ENV === 'production'
-        ? [
-            'https://multbot.com',
-            'https://mullttibot.duckdns.org',
-        ] // Adicionar domínios de produção
-        : true, // Permite qualquer origem em dev
+    origin: corsOrigin,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],

@@ -8,11 +8,9 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const token = localStorage.getItem('accessToken');
 
-  // Se não houver token, redirecionar para login
   if (!token) {
     return <Navigate to="/login" replace />;
   }
 
-  // Se houver token, renderizar o componente protegido
   return <>{children}</>;
 }

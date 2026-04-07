@@ -11,7 +11,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@lumi.new/sdk": "0.3.6",
     "axios": "^1.13.4",
     "framer-motion": "12.23.11",
     "lucide-react": "0.540.0",

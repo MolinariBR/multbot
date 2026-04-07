@@ -1,39 +1,71 @@
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
+
+const require = createRequire(import.meta.url);
+const PRISMA_CLIENT_PACKAGE_JSON = '@prisma/client/package.json';
 
 // pnpm may not create node_modules/.prisma automatically when build scripts are restricted.
 // Prisma's type declarations reference ".prisma/client/default", which requires this folder to be resolvable.
-function ensureSymlink() {
-  const cwd = process.cwd();
-  const linkPath = path.join(cwd, 'node_modules', '.prisma');
-
-  let prismaClientPkgJson;
-  try {
-    prismaClientPkgJson = require.resolve('@prisma/client/package.json', { paths: [cwd] });
-  } catch (err) {
-    // If @prisma/client is not installed yet, do nothing.
-    return;
-  }
-
-  const prismaClientDir = path.dirname(prismaClientPkgJson); // .../node_modules/@prisma/client
-  const target = path.resolve(prismaClientDir, '..', '..', '.prisma'); // .../node_modules/.prisma
-
-  if (!fs.existsSync(target)) {
-    return;
-  }
-
-  try {
-    const stat = fs.lstatSync(linkPath);
-    if (stat.isSymbolicLink()) return;
-    // If it's a real dir/file, don't overwrite it.
-    return;
-  } catch {
-    // doesn't exist
-  }
-
-  fs.mkdirSync(path.dirname(linkPath), { recursive: true });
-  fs.symlinkSync(target, linkPath, 'dir');
+function isNodeErrorWithCode(error, code) {
+  return (
+    typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === code
+  );
 }
 
-ensureSymlink();
+function resolvePrismaClientPackageJsonPath(workingDirectory) {
+  try {
+    return require.resolve(PRISMA_CLIENT_PACKAGE_JSON, { paths: [workingDirectory] });
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'MODULE_NOT_FOUND')) {
+      return null;
+    }
 
+    throw error;
+  }
+}
+
+function resolvePrismaTargetPath(prismaClientPackageJsonPath) {
+  const prismaClientDirectoryPath = path.dirname(prismaClientPackageJsonPath);
+  return path.resolve(prismaClientDirectoryPath, '..', '..', '.prisma');
+}
+
+function hasExistingEntryAtPath(filePath) {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (error) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function ensurePrismaSymlink() {
+  const workingDirectory = process.cwd();
+  const prismaSymlinkPath = path.join(workingDirectory, 'node_modules', '.prisma');
+  const prismaClientPackageJsonPath = resolvePrismaClientPackageJsonPath(workingDirectory);
+
+  if (!prismaClientPackageJsonPath) {
+    return;
+  }
+
+  const prismaTargetPath = resolvePrismaTargetPath(prismaClientPackageJsonPath);
+  if (!fs.existsSync(prismaTargetPath)) {
+    return;
+  }
+
+  if (hasExistingEntryAtPath(prismaSymlinkPath)) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(prismaSymlinkPath), { recursive: true });
+  fs.symlinkSync(prismaTargetPath, prismaSymlinkPath, 'dir');
+}
+
+ensurePrismaSymlink();

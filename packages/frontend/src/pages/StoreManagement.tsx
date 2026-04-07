@@ -5,7 +5,6 @@ import toast from 'react-hot-toast'
 export default function StoreManagement() {
   const [searchTerm, setSearchTerm] = useState('')
   const [showPixModal, setShowPixModal] = useState(false)
-  const [selectedStore, setSelectedStore] = useState<string | null>(null)
   const [amount, setAmount] = useState('')
   const [copiedKey, setCopiedKey] = useState(false)
 
@@ -23,8 +22,7 @@ export default function StoreManagement() {
       store.owner.toLowerCase().includes(searchTerm.toLowerCase())
   )
 
-  const handleGeneratePix = (storeId: string) => {
-    setSelectedStore(storeId)
+  const handleGeneratePix = () => {
     setShowPixModal(true)
   }
 
@@ -34,7 +32,6 @@ export default function StoreManagement() {
       return
     }
     toast.success('PIX QR Code generated successfully!')
-    // In real implementation, this would call backend to generate actual PIX code
   }
 
   const copyPixKey = () => {
@@ -99,7 +96,7 @@ export default function StoreManagement() {
             </div>
 
             <button
-              onClick={() => handleGeneratePix(store.id)}
+              onClick={handleGeneratePix}
               className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 rounded-lg transition-all border border-purple-500/30"
             >
               <QrCode size={18} />
@@ -155,7 +152,6 @@ export default function StoreManagement() {
                 onClick={() => {
                   setShowPixModal(false)
                   setAmount('')
-                  setSelectedStore(null)
                 }}
                 className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-all"
               >

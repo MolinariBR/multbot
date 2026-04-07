@@ -1,5 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
-import * as dashboardService from './dashboard.service.js';
+import {
+    dashboardStatsResponseJsonSchema,
+    platformStatusResponseJsonSchema,
+} from './dashboard.schema.js';
+import { getPlatformStatus, getStats } from './dashboard.service.js';
 
 export const dashboardRoutes: FastifyPluginAsync = async (app) => {
     app.get('/platform-status', {
@@ -8,35 +12,11 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
             summary: 'Status da plataforma (infra/servicos)',
             security: [{ bearerAuth: [] }],
             response: {
-                200: {
-                    type: 'object',
-                    properties: {
-                        apiOnline: { type: 'boolean' },
-                        serverTime: { type: 'string' },
-                        uptimeSec: { type: 'integer' },
-                        nodeVersion: { type: 'string' },
-                        bots: {
-                            type: 'object',
-                            properties: {
-                                activeConfigured: { type: 'integer' },
-                                running: { type: 'integer' },
-                            },
-                            required: ['activeConfigured', 'running'],
-                        },
-                        depix: {
-                            type: 'object',
-                            properties: {
-                                configured: { type: 'boolean' },
-                            },
-                            required: ['configured'],
-                        },
-                    },
-                    required: ['apiOnline', 'serverTime', 'uptimeSec', 'nodeVersion', 'bots', 'depix'],
-                },
+                200: platformStatusResponseJsonSchema,
             },
         },
-    }, async (request, reply) => {
-        const status = await dashboardService.getPlatformStatus();
+    }, async (_request, reply) => {
+        const status = await getPlatformStatus();
         return reply.send(status);
     });
 
@@ -46,30 +26,11 @@ export const dashboardRoutes: FastifyPluginAsync = async (app) => {
             summary: 'Estatísticas do dashboard',
             security: [{ bearerAuth: [] }],
             response: {
-                200: {
-                    type: 'object',
-                    properties: {
-                        botsCount: { type: 'integer' },
-                        transactionsCount: { type: 'integer' },
-                        totalRevenue: { type: 'integer' },
-                        successRate: { type: 'number' },
-                        topBots: {
-                            type: 'array',
-                            items: {
-                                type: 'object',
-                                properties: {
-                                    id: { type: 'string' },
-                                    name: { type: 'string' },
-                                    revenue: { type: 'integer' },
-                                },
-                            },
-                        },
-                    },
-                },
+                200: dashboardStatsResponseJsonSchema,
             },
         },
-    }, async (request, reply) => {
-        const stats = await dashboardService.getStats();
+    }, async (_request, reply) => {
+        const stats = await getStats();
         return reply.send(stats);
     });
 };

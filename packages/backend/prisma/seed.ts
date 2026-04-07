@@ -3,104 +3,153 @@ import { hashPassword } from '../src/lib/hash.js';
 
 const prisma = new PrismaClient();
 
-async function main() {
-    console.log('🌱 Iniciando seed...');
+const DEFAULT_ADMIN_EMAIL = 'admin@test.com';
+const DEFAULT_ADMIN_PASSWORD = 'password123';
+const DEFAULT_ADMIN_NAME = 'Administrador';
 
-    // Criar admin padrão
-    const adminEmail = process.env.ADMIN_EMAIL || 'admin@test.com';
-    const adminPassword = process.env.ADMIN_PASSWORD || 'password123';
-    const adminName = process.env.ADMIN_NAME || 'Administrador';
+const SAMPLE_BOT_DATA = {
+    name: 'MultBot Store',
+    telegramToken: '8374587252:AAGsF-4eLbTZxCOMisoTzutKWAcbcGsoCQQ',
+    telegramUsername: '@mulltti_bot',
+    ownerName: 'João Silva',
+    depixAddress: 'VJLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    splitRate: 0.10,
+    status: 'active',
+};
 
+const SAMPLE_TRANSACTIONS = [
+    { amountBrl: 15000, status: 'completed' },
+    { amountBrl: 20000, status: 'completed' },
+    { amountBrl: 5000, status: 'processing' },
+    { amountBrl: 10000, status: 'failed' },
+] as const;
+
+type SampleTransaction = (typeof SAMPLE_TRANSACTIONS)[number];
+
+function resolveAdminSeedData() {
+    const email = process.env.ADMIN_EMAIL ?? DEFAULT_ADMIN_EMAIL;
+    const password = process.env.ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD;
+    const name = process.env.ADMIN_NAME ?? DEFAULT_ADMIN_NAME;
+    const isDefaultPassword = password === DEFAULT_ADMIN_PASSWORD;
+
+    return { email, password, name, isDefaultPassword };
+}
+
+function shouldSeedSampleData(): boolean {
+    const isDevelopmentEnvironment = process.env.NODE_ENV === 'development';
+    const hasForcedSampleData = process.env.FORCE_SAMPLE_DATA === 'true';
+
+    return isDevelopmentEnvironment || hasForcedSampleData;
+}
+
+function calculateSplitAmounts(amountBrl: number, splitRate: number) {
+    const merchantSplit = Math.round(amountBrl * (1 - splitRate));
+    const adminSplit = amountBrl - merchantSplit;
+
+    return { merchantSplit, adminSplit };
+}
+
+async function ensureDefaultAdmin(): Promise<void> {
+    const adminSeedData = resolveAdminSeedData();
     const existingAdmin = await prisma.admin.findUnique({
-        where: { email: adminEmail },
+        where: { email: adminSeedData.email },
     });
 
     if (existingAdmin) {
-        console.log(`✅ Admin já existe: ${adminEmail}`);
-    } else {
-        const hashedPassword = await hashPassword(adminPassword);
-
-        await prisma.admin.create({
-            data: {
-                email: adminEmail,
-                password: hashedPassword,
-                name: adminName,
-            },
-        });
-
-        console.log(`✅ Admin criado: ${adminEmail}`);
-        console.log(`   Senha: ${adminPassword}`);
+        console.log(`✅ Admin já existe: ${adminSeedData.email}`);
+        return;
     }
 
-    // Criar settings padrão
+    const hashedPassword = await hashPassword(adminSeedData.password);
+    await prisma.admin.create({
+        data: {
+            email: adminSeedData.email,
+            password: hashedPassword,
+            name: adminSeedData.name,
+        },
+    });
+
+    console.log(`✅ Admin criado: ${adminSeedData.email}`);
+    if (adminSeedData.isDefaultPassword) {
+        console.log('⚠️ Senha padrão em uso. Defina ADMIN_PASSWORD para alterar.');
+    }
+}
+
+async function ensureDefaultSettings(): Promise<void> {
     const existingSettings = await prisma.settings.findUnique({
         where: { id: 'settings' },
     });
 
-    if (!existingSettings) {
-        await prisma.settings.create({
-            data: { id: 'settings' },
+    if (existingSettings) {
+        return;
+    }
+
+    await prisma.settings.create({
+        data: { id: 'settings' },
+    });
+    console.log('✅ Settings criado');
+}
+
+function buildTransactionData(sampleTransaction: SampleTransaction, botId: string, splitRate: number) {
+    const splitAmounts = calculateSplitAmounts(sampleTransaction.amountBrl, splitRate);
+    const isCompleted = sampleTransaction.status === 'completed';
+
+    return {
+        botId,
+        amountBrl: sampleTransaction.amountBrl,
+        depixAmount: Math.round(sampleTransaction.amountBrl * 0.3),
+        merchantSplit: splitAmounts.merchantSplit,
+        adminSplit: splitAmounts.adminSplit,
+        customerName: 'Cliente Exemplo',
+        status: sampleTransaction.status,
+        completedAt: isCompleted ? new Date() : null,
+    };
+}
+
+async function createSampleTransactions(botId: string, splitRate: number): Promise<void> {
+    for (const sampleTransaction of SAMPLE_TRANSACTIONS) {
+        await prisma.transaction.create({
+            data: buildTransactionData(sampleTransaction, botId, splitRate),
         });
-        console.log('✅ Settings criado');
+    }
+}
+
+async function ensureSampleData(): Promise<void> {
+    if (!shouldSeedSampleData()) {
+        return;
     }
 
-    // Criar dados de exemplo (opcional, para desenvolvimento ou se forçado)
-    if (process.env.NODE_ENV === 'development' || process.env.FORCE_SAMPLE_DATA === 'true') {
-        const existingBot = await prisma.bot.findFirst();
-
-        if (!existingBot) {
-            const bot = await prisma.bot.create({
-                data: {
-                    name: 'MultBot Store',
-                    telegramToken: '8374587252:AAGsF-4eLbTZxCOMisoTzutKWAcbcGsoCQQ',
-                    telegramUsername: '@mulltti_bot',
-                    ownerName: 'João Silva',
-                    depixAddress: 'VJLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-                    splitRate: 0.10,
-                    status: 'active',
-                },
-            });
-
-            console.log(`✅ Bot de exemplo criado: ${bot.name}`);
-
-            // Criar algumas transações de exemplo
-            const transactions = [
-                { amountBrl: 15000, status: 'completed' },
-                { amountBrl: 20000, status: 'completed' },
-                { amountBrl: 5000, status: 'processing' },
-                { amountBrl: 10000, status: 'failed' },
-            ];
-
-            for (const tx of transactions) {
-                const merchantSplit = Math.round(tx.amountBrl * (1 - bot.splitRate));
-                const adminSplit = tx.amountBrl - merchantSplit;
-
-                await prisma.transaction.create({
-                    data: {
-                        botId: bot.id,
-                        amountBrl: tx.amountBrl,
-                        depixAmount: Math.round(tx.amountBrl * 0.3), // Exemplo
-                        merchantSplit,
-                        adminSplit,
-                        customerName: 'Cliente Exemplo',
-                        status: tx.status,
-                        completedAt: tx.status === 'completed' ? new Date() : null,
-                    },
-                });
-            }
-
-            console.log('✅ Transações de exemplo criadas');
-        }
+    const existingBot = await prisma.bot.findFirst();
+    if (existingBot) {
+        return;
     }
 
+    const sampleBot = await prisma.bot.create({
+        data: SAMPLE_BOT_DATA,
+    });
+
+    console.log(`✅ Bot de exemplo criado: ${sampleBot.name}`);
+    await createSampleTransactions(sampleBot.id, sampleBot.splitRate);
+    console.log('✅ Transações de exemplo criadas');
+}
+
+async function runSeed(): Promise<void> {
+    console.log('🌱 Iniciando seed...');
+    await ensureDefaultAdmin();
+    await ensureDefaultSettings();
+    await ensureSampleData();
     console.log('🎉 Seed concluído!');
 }
 
-main()
-    .catch((e) => {
-        console.error('❌ Erro no seed:', e);
-        process.exit(1);
-    })
-    .finally(async () => {
+async function executeSeed(): Promise<void> {
+    try {
+        await runSeed();
+    } catch (error: unknown) {
+        console.error('❌ Erro no seed:', error);
+        process.exitCode = 1;
+    } finally {
         await prisma.$disconnect();
-    });
+    }
+}
+
+void executeSeed();

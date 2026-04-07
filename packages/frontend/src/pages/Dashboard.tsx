@@ -1,7 +1,11 @@
-import { useState, useEffect } from 'react';
-import { TrendingUp, Bot, Wallet, Activity, ArrowUpRight, AlertCircle, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api';
 import toast from 'react-hot-toast';
+import { DashboardHeader } from '../components/DashboardHeader';
+import { DashboardStats } from '../components/DashboardStats';
+import { DashboardBotsTable } from '../components/DashboardBotsTable';
+import { DashboardTopBots } from '../components/DashboardTopBots';
 
 interface Stats {
   botsCount: number;
@@ -39,7 +43,7 @@ export default function Dashboard() {
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const adminName = 'Zydra';
 
-  const loadData = async (isRefresh = false) => {
+  const loadData = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
         setRefreshing(true);
@@ -61,9 +65,10 @@ export default function Dashboard() {
       if (isRefresh) {
         toast.success('Dados atualizados!');
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } }; message?: string };
       console.error('Erro ao carregar dados:', err);
-      const errorMessage = err.response?.data?.error || 'Erro ao carregar dados do servidor';
+      const errorMessage = error.response?.data?.error || 'Erro ao carregar dados do servidor';
       setError(errorMessage);
 
       if (isRefresh) {
@@ -73,7 +78,7 @@ export default function Dashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
@@ -84,7 +89,7 @@ export default function Dashboard() {
     }, 30000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [loadData]);
 
   if (loading) {
     return (
@@ -124,180 +129,12 @@ export default function Dashboard() {
     );
   }
 
-  const dashboardStats = [
-    {
-      name: 'Total de Bots',
-      value: stats?.botsCount || 0,
-      icon: Bot,
-      gradient: 'from-fuchsia-500 to-pink-500',
-    },
-    {
-      name: 'Transações',
-      value: stats?.transactionsCount || 0,
-      icon: Activity,
-      gradient: 'from-orange-500 to-amber-500',
-    },
-    {
-      name: 'Receita Total',
-      value: `R$ ${((stats?.totalRevenue || 0) / 100).toFixed(2)}`,
-      icon: Wallet,
-      gradient: 'from-violet-500 to-purple-500',
-    },
-    {
-      name: 'Taxa de Sucesso',
-      value: `${stats?.successRate || 0}%`,
-      icon: TrendingUp,
-      gradient: 'from-emerald-500 to-teal-500',
-    },
-  ];
-
   return (
     <div className="space-y-8">
-      {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-bold text-white mb-2">
-            Bem-vindo, {adminName}
-          </h1>
-          <p className="text-gray-400 text-lg">
-            Visão geral da sua plataforma MultiBot
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-gray-500 hidden md:block">
-            Atualizado: {lastUpdate.toLocaleTimeString()}
-          </span>
-          <button
-            onClick={() => loadData(true)}
-            disabled={refreshing}
-            className="p-2.5 bg-violet-500/10 hover:bg-violet-500/20 text-violet-400 rounded-xl transition-all border border-violet-500/20"
-            title="Atualizar dados"
-          >
-            <RefreshCw size={20} className={refreshing ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-        {dashboardStats.map((stat) => {
-          const Icon = stat.icon;
-          return (
-            <div
-              key={stat.name}
-              className="group relative bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl p-6 border border-violet-500/10 hover:border-violet-500/30 transition-all duration-300 overflow-hidden"
-            >
-              <div className={`absolute inset-0 opacity-0 group-hover:opacity-10 bg-gradient-to-br ${stat.gradient} transition-opacity`} />
-
-              <div className="relative">
-                <div className="flex items-start justify-between mb-4">
-                  <div className="flex-1">
-                    <p className="text-gray-400 text-sm font-medium mb-1">{stat.name}</p>
-                    <p className="text-3xl font-bold text-white">{stat.value}</p>
-                  </div>
-                  <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${stat.gradient} flex items-center justify-center shadow-lg opacity-80 group-hover:opacity-100 transition-opacity`}>
-                    <Icon className="text-white" size={24} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Bots List */}
-      <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 overflow-hidden">
-        <div className="p-6 border-b border-violet-500/10">
-          <h2 className="text-2xl font-bold text-white">Seus Bots ({bots.length})</h2>
-          <p className="text-gray-400 text-sm mt-1">Gerenciamento de bots Telegram</p>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-black/50">
-              <tr>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Bot
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Status
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Transações
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Receita
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {bots.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-gray-400">
-                    Nenhum bot criado ainda
-                  </td>
-                </tr>
-              ) : (
-                bots.map((bot) => (
-                  <tr
-                    key={bot.id}
-                    className="border-t border-zinc-800/50 hover:bg-black/20 transition-colors"
-                  >
-                    <td className="px-6 py-4">
-                      <div>
-                        <p className="font-semibold text-white">{bot.name}</p>
-                        <p className="text-xs text-gray-500">{bot.id.slice(0, 8)}...</p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                        {bot.status}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-white font-semibold">{bot.transactionsCount || 0}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <p className="text-white font-semibold">
-                          R$ {(bot.totalRevenue / 100).toFixed(2)}
-                        </p>
-                        <ArrowUpRight className="text-emerald-400" size={16} />
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Top Bots */}
-      {
-        stats?.topBots && stats.topBots.length > 0 && (
-          <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 p-6">
-            <h2 className="text-2xl font-bold text-white mb-4">Top Bots por Receita</h2>
-            <div className="space-y-3">
-              {stats.topBots.map((bot, idx) => (
-                <div
-                  key={bot.id}
-                  className="flex items-center justify-between p-4 bg-black/30 rounded-lg border border-violet-500/10 hover:border-violet-500/30 transition-all"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-8 h-8 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center font-bold text-white">
-                      {idx + 1}
-                    </div>
-                    <p className="font-semibold text-white">{bot.name}</p>
-                  </div>
-                  <p className="font-bold text-emerald-400">R$ {(bot.revenue / 100).toFixed(2)}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )
-      }
-    </div >
+      <DashboardHeader adminName={adminName} lastUpdate={lastUpdate} onRefresh={() => loadData(true)} refreshing={refreshing} />
+      <DashboardStats stats={stats} />
+      <DashboardBotsTable bots={bots} />
+      <DashboardTopBots topBots={stats?.topBots || []} />
+    </div>
   );
 }

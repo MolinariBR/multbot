@@ -23,6 +23,10 @@ Estes são os scripts principais na raiz do projeto (`/root/multbot`).
   * **O que faz**: Automatiza todo o processo de deploy: Atualiza o código, instala dependências, roda migrações do banco, builda o frontend/backend e reinicia os serviços.
   * **Quando usar**: Sempre que você quiser atualizar o sistema com as últimas mudanças do GitHub.
 
+* `./vps-update.sh`
+  * **O que faz**: Atualiza incrementalmente a VPS (faz `git pull`, instala dependências, aplica `prisma db push` no banco de produção, builda e reinicia backend/frontend, recarrega Nginx).
+  * **Quando usar**: No dia-a-dia, após você dar `git push` (na sua máquina) e quiser aplicar as mudanças na VPS.
+
 * `./setup-ssl.sh`
   * **O que faz**: Configura certificados SSL (HTTPS) gratuitos usando Certbot/LetsEncrypt.
   * **Quando usar**: Apenas na primeira configuração ou se os certificados expirarem e não renovarem automaticamente.
@@ -68,11 +72,57 @@ Comandos executados dentro da pasta `packages/backend`.
   * **Como usar**: Na VPS pode ser difícil acessar, mas em desenvolvimento local é excelente.
 
 * `pnpm prisma db push`
-  * **O que faz**: "Empurra" as mudanças do arquivo `schema.prisma` para o banco de dados real (`dev.db`).
-  * **Quando usar**: Sempre que você alterar a estrutura do banco (adicionar tabelas ou campos).
+  * **O que faz**: "Empurra" as mudanças do arquivo `schema.prisma` para o banco de dados real apontado por `DATABASE_URL`.
+  * **Produção (VPS)**: garanta que `DATABASE_URL` está apontando para `file:/var/multbot/data/prod.db` (não para `dev.db`).
+  * **Quando usar**: Sempre que você atualizar o código e ele trouxer mudanças de schema (novas tabelas/colunas).
 
 * `pnpm prisma db seed`
   * **O que faz**: Roda o script de "seeding" (popula o banco com dados iniciais, como o usuário Admin padrão).
+
+---
+
+## 🔔 Notificações (Somente Admins)
+
+As notificações do sistema são apenas para administradores (não envia mensagens para clientes).
+
+### Telegram (Bot Admin Separado)
+
+1. Crie um bot no BotFather e copie o token.
+2. Na VPS, configure no arquivo `/root/multbot/packages/backend/.env`:
+
+```bash
+TELEGRAM_ADMIN_BOT_TOKEN=SEU_TOKEN_AQUI
+```
+
+3. Reinicie o backend:
+
+```bash
+pm2 restart multbot-backend
+pm2 logs multbot-backend --lines 50
+```
+
+4. No painel, vá em `Configurações` e clique em **Gerar Código**.
+5. No Telegram, abra o chat com o bot admin e envie:
+
+```text
+/link SEU_CODIGO
+```
+
+Após vincular, esse admin passa a receber alertas no Telegram.
+
+### Email (SMTP)
+
+Para enviar email para todos os admins, configure no `/root/multbot/packages/backend/.env`:
+
+```bash
+SMTP_HOST=...
+SMTP_PORT=...
+SMTP_USER=...
+SMTP_PASS=...
+MAIL_FROM=...
+```
+
+Depois reinicie o backend (`pm2 restart multbot-backend`) e use o botão **Testar Email** em `Configurações`.
 
 ---
 

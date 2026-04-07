@@ -26,20 +26,18 @@ export function Login() {
 
       if (response.ok) {
         const data = await response.json();
-        // Salvar token em localStorage
         localStorage.setItem('accessToken', data.accessToken);
         localStorage.setItem('adminEmail', data.admin.email);
         localStorage.setItem('adminName', data.admin.name);
         setSuccess(true);
-        // Redirecionar para dashboard
         setTimeout(() => navigate('/'), 500);
       } else {
         const errorData = await response.json();
         setError(errorData.error || 'Email ou senha inválidos');
       }
     } catch (err) {
-      setError('Erro ao conectar com servidor');
-      console.error(err);
+      setError('Falha na conexão: verifique sua internet ou tente novamente mais tarde');
+      console.error('Erro no login:', err);
     } finally {
       setLoading(false);
     }

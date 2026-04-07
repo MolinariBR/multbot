@@ -1,102 +1,96 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { SafeParseReturnType } from 'zod';
+import { ValidationError } from '../../lib/error.js';
+import { mapDepixStatusToWebhookStatus } from './depix.mapper.js';
+import {
+    depixWebhookBodyJsonSchema,
+    depixWebhookBodySchema,
+    testPaymentBodyJsonSchema,
+    testPaymentBodySchema,
+    type DepixWebhookBodyInput,
+} from './depix.schema.js';
+import type { DepixWebhookPayload } from './depix.service.js';
 import { depixService } from './depix.service.js';
-import { prisma } from '../../lib/prisma.js';
+
+const DEFAULT_TEST_PAYMENT_DESCRIPTION = 'Teste de pagamento';
+
+function normalizeFieldErrors(
+    fieldErrors: Record<string, string[] | undefined>,
+): Record<string, string[]> {
+    return Object.fromEntries(
+        Object.entries(fieldErrors).map(([field, errors]) => [field, errors ?? []]),
+    );
+}
+
+function parseSchemaOrThrow<T>(parsedResult: SafeParseReturnType<unknown, T>): T {
+    if (parsedResult.success) {
+        return parsedResult.data;
+    }
+
+    const fieldErrors = normalizeFieldErrors(parsedResult.error.flatten().fieldErrors);
+    throw new ValidationError('Dados inválidos', fieldErrors);
+}
+
+function mapWebhookBodyToInternalPayload(
+    depixWebhookBody: DepixWebhookBodyInput,
+): DepixWebhookPayload {
+    return {
+        paymentId: depixWebhookBody.qrId,
+        status: mapDepixStatusToWebhookStatus(depixWebhookBody.status),
+        amount: depixWebhookBody.valueInCents,
+        liquidAmount: 0,
+        txId: depixWebhookBody.blockchainTxID,
+        payerName: depixWebhookBody.payerName,
+        payerTaxNumber: depixWebhookBody.payerTaxNumber,
+        payerEUID: depixWebhookBody.payerEUID,
+        bankTxId: depixWebhookBody.bankTxId,
+        customerMessage: depixWebhookBody.customerMessage,
+    };
+}
 
 export const depixRoutes: FastifyPluginAsync = async (app) => {
-    // Webhook do Depix (não requer autenticação JWT)
     app.post('/webhook', {
         schema: {
             tags: ['Depix'],
             summary: 'Webhook de notificações Depix',
-            body: {
-                type: 'object',
-                properties: {
-                    webhookType: { type: 'string' },
-                    qrId: { type: 'string' },
-                    status: { type: 'string' },
-                    valueInCents: { type: 'number' },
-                    pixKey: { type: 'string' },
-                    payerName: { type: 'string' },
-                    payerTaxNumber: { type: 'string' },
-                    payerEUID: { type: 'string' },
-                    bankTxId: { type: 'string' },
-                    blockchainTxID: { type: 'string' },
-                    customerMessage: { type: 'string' },
-                    expiration: { type: 'string' },
-                },
-                required: ['webhookType', 'qrId', 'status', 'valueInCents'],
-            },
+            body: depixWebhookBodyJsonSchema,
         },
     }, async (request, reply) => {
         try {
-            // TODO: Validar assinatura do webhook com DEPIX_WEBHOOK_SECRET
+            const depixWebhookBody = parseSchemaOrThrow(depixWebhookBodySchema.safeParse(request.body));
+            const webhookPayload = mapWebhookBodyToInternalPayload(depixWebhookBody);
 
-            const payload = request.body as any;
-
-            // Mapear payload da Depix para o formato interno
-            const statusMap: Record<string, 'pending' | 'completed' | 'failed'> = {
-                'pending': 'pending',
-                'pending_pix2fa': 'pending',
-                'depix_sent': 'completed',
-                'under_review': 'pending',
-                'canceled': 'failed',
-                'error': 'failed',
-                'refunded': 'failed',
-                'expired': 'failed',
-                'delayed': 'pending',
-            };
-
-            const internalPayload = {
-                paymentId: payload.qrId,
-                status: statusMap[payload.status] || 'pending',
-                amount: payload.valueInCents,
-                liquidAmount: 0, // Depix não envia isso no webhook
-                txId: payload.blockchainTxID,
-
-                // Informações do Pagador
-                payerName: payload.payerName,
-                payerTaxNumber: payload.payerTaxNumber,
-                payerEUID: payload.payerEUID,
-                bankTxId: payload.bankTxId,
-                customerMessage: payload.customerMessage,
-            };
-
-            await depixService.handleWebhook(internalPayload);
-
+            await depixService.handleWebhook(webhookPayload);
             return reply.status(200).send({ received: true });
-        } catch (error) {
-            console.error('Erro ao processar webhook Depix:', error);
-            return reply.status(500).send({ error: 'Internal server error' });
+        } catch (error: unknown) {
+            request.log.error({ error }, 'Erro ao processar webhook Depix');
+            const message = error instanceof Error ? error.message : 'Erro interno do servidor';
+
+            return reply.status(500).send({ error: message });
         }
     });
 
-    // Endpoint para testar criação de pagamento (protegido)
     app.post('/test-payment', {
         schema: {
             tags: ['Depix'],
             summary: 'Testar criação de pagamento Depix',
             security: [{ bearerAuth: [] }],
-            body: {
-                type: 'object',
-                properties: {
-                    amount: { type: 'number' },
-                    description: { type: 'string' },
-                },
-                required: ['amount'],
-            },
+            body: testPaymentBodyJsonSchema,
         },
     }, async (request, reply) => {
         try {
-            const { amount, description } = request.body as any;
-
+            const testPaymentBody = parseSchemaOrThrow(testPaymentBodySchema.safeParse(request.body));
             const payment = await depixService.createPayment({
-                amount,
-                description: description || 'Teste de pagamento',
+                amount: testPaymentBody.amount,
+                description: testPaymentBody.description ?? DEFAULT_TEST_PAYMENT_DESCRIPTION,
             });
 
             return reply.send(payment);
-        } catch (error: any) {
-            return reply.status(500).send({ error: error.message });
+        } catch (error: unknown) {
+            request.log.error({ error }, 'Erro ao criar pagamento de teste na Depix');
+            const message = error instanceof Error ? error.message : 'Erro interno do servidor';
+
+            return reply.status(500).send({ error: message });
         }
     });
 };

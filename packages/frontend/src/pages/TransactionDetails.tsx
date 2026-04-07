@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, CheckCircle, XCircle, Clock, Copy, ExternalLink, AlertCircle } from 'lucide-react';
 import { api } from '../lib/api';
@@ -27,26 +27,27 @@ export default function TransactionDetails() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
-    useEffect(() => {
-        if (id) {
-            loadDetails();
-        }
-    }, [id]);
-
-    const loadDetails = async () => {
+    const loadDetails = useCallback(async () => {
         try {
             setLoading(true);
             setError('');
 
             const response = await api.get(`/transactions/${id}`);
             setTransaction(response.data);
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error('Erro ao carregar transação:', err);
-            setError(err.response?.data?.error || 'Erro ao carregar detalhes da transação');
+            const message = err instanceof Error ? err.message : 'Erro desconhecido';
+            setError(message || 'Erro ao carregar detalhes da transação');
         } finally {
             setLoading(false);
         }
-    };
+    }, [id]);
+
+    useEffect(() => {
+        if (id) {
+            loadDetails();
+        }
+    }, [id, loadDetails]);
 
     const copyToClipboard = (text: string) => {
         navigator.clipboard.writeText(text);

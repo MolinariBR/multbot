@@ -1,153 +1,238 @@
-import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Search, Download, Calendar, AlertCircle, ArrowUpDown, ExternalLink } from 'lucide-react'
+import { isAxiosError } from 'axios'
+import { AlertCircle, Download } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import toast from 'react-hot-toast'
-import { api } from '../lib/api'
-import Pagination from '../components/Pagination'
+import { useNavigate } from 'react-router-dom'
 
-interface Transaction {
-  id: string;
-  botId: string;
-  botName: string;
-  customerName: string | null;
-  amountBrl: number;
-  depixAmount: number;
-  merchantSplit: number;
-  adminSplit: number;
-  pixKey: string | null;
-  status: string;
-  createdAt: string;
-  completedAt: string | null;
+import TransactionHistoryFilters from '../components/transactions/TransactionHistoryFilters'
+import TransactionHistoryStats from '../components/transactions/TransactionHistoryStats'
+import TransactionHistoryTable from '../components/transactions/TransactionHistoryTable'
+import { api } from '../lib/api'
+import type {
+  SortOption,
+  SortOrder,
+  TransactionExportParams,
+  TransactionListParams,
+  TransactionRecord,
+  TransactionsResponse,
+  TransactionSortField,
+  TransactionStatusFilter,
+  PaginationData,
+} from './TransactionHistory.types'
+
+const DEFAULT_FETCH_ERROR_MESSAGE = 'Erro ao carregar transações'
+const DEFAULT_EXPORT_ERROR_MESSAGE = 'Erro ao exportar transações'
+const TRANSACTION_LIST_ENDPOINT = '/transactions'
+const TRANSACTION_EXPORT_ENDPOINT = '/transactions/export'
+
+const STATUS_STYLES: Record<string, string> = {
+  completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
+  processing: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
+  failed: 'bg-red-500/10 text-red-400 border-red-500/30',
 }
 
-interface PaginationData {
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
+const STATUS_LABELS: Record<string, string> = {
+  completed: 'Concluída',
+  processing: 'Processando',
+  failed: 'Falhou',
+}
+
+function formatCurrencyFromCents(valueInCents: number): string {
+  return `R$ ${(valueInCents / 100).toFixed(2)}`
+}
+
+function getErrorMessage(error: unknown, fallbackMessage: string): string {
+  if (isAxiosError(error)) {
+    const responseData = error.response?.data as { error?: string; message?: string } | undefined
+
+    return responseData?.error ?? responseData?.message ?? error.message ?? fallbackMessage
+  }
+
+  if (error instanceof Error && error.message) {
+    return error.message
+  }
+
+  return fallbackMessage
+}
+
+function triggerFileDownload(fileBlob: Blob, fileName: string): void {
+  const objectUrl = window.URL.createObjectURL(fileBlob)
+
+  try {
+    const anchorElement = document.createElement('a')
+    anchorElement.href = objectUrl
+    anchorElement.setAttribute('download', fileName)
+    document.body.appendChild(anchorElement)
+    anchorElement.click()
+    anchorElement.remove()
+  } finally {
+    window.URL.revokeObjectURL(objectUrl)
+  }
+}
+
+function getStatusBadge(status: string) {
+  const badgeStyle = STATUS_STYLES[status] ?? STATUS_STYLES.processing
+  const badgeLabel = STATUS_LABELS[status] ?? status
+
+  return (
+    <span className={`px-3 py-1 rounded-full text-xs font-medium border ${badgeStyle}`}>
+      {badgeLabel}
+    </span>
+  )
+}
+
+function parseSortOption(sortOption: string): {
+  field: TransactionSortField
+  order: SortOrder
+} {
+  if (sortOption === 'createdAt-asc') {
+    return { field: 'createdAt', order: 'asc' }
+  }
+
+  if (sortOption === 'amountBrl-desc') {
+    return { field: 'amountBrl', order: 'desc' }
+  }
+
+  if (sortOption === 'amountBrl-asc') {
+    return { field: 'amountBrl', order: 'asc' }
+  }
+
+  return { field: 'createdAt', order: 'desc' }
 }
 
 export default function TransactionHistory() {
   const navigate = useNavigate()
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [searchInput, setSearchInput] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<TransactionStatusFilter>('all')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
-  const [sortBy, setSortBy] = useState('createdAt')
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
-  const [page, setPage] = useState(1)
-  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [sortField, setSortField] = useState<TransactionSortField>('createdAt')
+  const [sortOrder, setSortOrder] = useState<SortOrder>('desc')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [transactions, setTransactions] = useState<TransactionRecord[]>([])
   const [pagination, setPagination] = useState<PaginationData | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [errorMessage, setErrorMessage] = useState('')
 
-  useEffect(() => {
-    loadTransactions()
-  }, [statusFilter, dateFrom, dateTo, sortBy, sortOrder, page])
+  const sortOption: SortOption = `${sortField}-${sortOrder}`
 
-  const loadTransactions = async () => {
+  const totalTransactionAmount = useMemo(() => {
+    return transactions.reduce((sum, transaction) => sum + transaction.amountBrl, 0)
+  }, [transactions])
+
+  const totalPlatformFee = useMemo(() => {
+    return transactions.reduce((sum, transaction) => sum + transaction.adminSplit, 0)
+  }, [transactions])
+
+  const buildBaseFilters = useCallback((): TransactionExportParams => {
+    const baseFilters: TransactionExportParams = {}
+
+    if (statusFilter !== 'all') {
+      baseFilters.status = statusFilter
+    }
+
+    if (dateFrom) {
+      baseFilters.dateFrom = dateFrom
+    }
+
+    if (dateTo) {
+      baseFilters.dateTo = dateTo
+    }
+
+    return baseFilters
+  }, [statusFilter, dateFrom, dateTo])
+
+  const buildListParams = useCallback((): TransactionListParams => {
+    const listParams: TransactionListParams = {
+      page: currentPage,
+      limit: 20,
+      sortBy: sortField,
+      sortOrder,
+      ...buildBaseFilters(),
+    }
+
+    if (searchQuery) {
+      listParams.search = searchQuery
+    }
+
+    return listParams
+  }, [currentPage, sortField, sortOrder, searchQuery, buildBaseFilters])
+
+  const fetchTransactions = useCallback(async () => {
+    setIsLoading(true)
+    setErrorMessage('')
+
     try {
-      setLoading(true)
-      setError('')
+      const response = await api.get<TransactionsResponse>(TRANSACTION_LIST_ENDPOINT, {
+        params: buildListParams(),
+      })
 
-      const params: any = {
-        page,
-        limit: 20,
-        sortBy,
-        sortOrder,
-      }
-
-      if (statusFilter !== 'all') {
-        params.status = statusFilter
-      }
-      if (dateFrom) {
-        params.dateFrom = dateFrom
-      }
-      if (dateTo) {
-        params.dateTo = dateTo
-      }
-      if (searchTerm) {
-        params.search = searchTerm
-      }
-
-      const response = await api.get('/transactions', { params })
       setTransactions(response.data.data)
       setPagination(response.data.pagination)
-    } catch (err: any) {
-      console.error('Erro ao carregar transações:', err)
-      setError(err.response?.data?.error || 'Erro ao carregar transações')
-      toast.error('Erro ao carregar transações')
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, DEFAULT_FETCH_ERROR_MESSAGE)
+      console.error('Erro ao carregar transações', { error })
+      setErrorMessage(message)
+      toast.error(message)
     } finally {
-      setLoading(false)
+      setIsLoading(false)
     }
-  }
+  }, [buildListParams])
 
-  const handleSearch = () => {
-    setPage(1)
-    loadTransactions()
-  }
-
-  const handleExport = async () => {
+  const exportTransactions = useCallback(async () => {
     try {
-      const params: any = {}
-      if (statusFilter !== 'all') params.status = statusFilter
-      if (dateFrom) params.dateFrom = dateFrom
-      if (dateTo) params.dateTo = dateTo
-
-      const response = await api.get('/transactions/export', {
-        params,
+      const response = await api.get<Blob>(TRANSACTION_EXPORT_ENDPOINT, {
+        params: buildBaseFilters(),
         responseType: 'blob',
       })
 
-      const url = window.URL.createObjectURL(new Blob([response.data]))
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `transactions_${new Date().toISOString().split('T')[0]}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-
+      const dateStamp = new Date().toISOString().split('T')[0]
+      triggerFileDownload(response.data, `transactions_${dateStamp}.csv`)
       toast.success('Transações exportadas com sucesso!')
-    } catch (err) {
-      toast.error('Erro ao exportar transações')
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, DEFAULT_EXPORT_ERROR_MESSAGE)
+      console.error('Erro ao exportar transações', { error })
+      toast.error(message)
     }
-  }
+  }, [buildBaseFilters])
 
-  const getStatusBadge = (status: string) => {
-    const styles = {
-      completed: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
-      processing: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
-      failed: 'bg-red-500/10 text-red-400 border-red-500/30',
-    }
-    const labels = {
-      completed: 'Concluída',
-      processing: 'Processando',
-      failed: 'Falhou',
-    }
-    return (
-      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${styles[status as keyof typeof styles] || styles.processing}`}>
-        {labels[status as keyof typeof labels] || status}
-      </span>
-    )
-  }
+  const handleSearch = useCallback(() => {
+    setCurrentPage(1)
+    setSearchQuery(searchInput.trim())
+  }, [searchInput])
 
-  if (loading && transactions.length === 0) {
+  const handleSortChange = useCallback((selectedSortOption: string) => {
+    const { field, order } = parseSortOption(selectedSortOption)
+    setSortField(field)
+    setSortOrder(order)
+  }, [])
+
+  const handleOpenTransaction = useCallback((transactionId: string) => {
+    navigate(`/transacoes/${transactionId}`)
+  }, [navigate])
+
+  useEffect(() => {
+    void fetchTransactions()
+  }, [fetchTransactions])
+
+  if (isLoading && transactions.length === 0) {
     return (
       <div className="space-y-8">
         <h1 className="text-4xl font-bold text-white">Carregando...</h1>
-        <div className="bg-gray-800 rounded-lg h-96 animate-pulse"></div>
+        <div className="bg-gray-800 rounded-lg h-96 animate-pulse" />
       </div>
     )
   }
 
-  if (error && transactions.length === 0) {
+  if (errorMessage && transactions.length === 0) {
     return (
       <div className="space-y-8">
         <div className="flex items-center gap-4 p-6 bg-red-900/20 border border-red-700 rounded-lg">
           <AlertCircle className="text-red-400" size={24} />
           <div>
             <h3 className="text-red-400 font-semibold">Erro ao Carregar Transações</h3>
-            <p className="text-red-300 text-sm">{error}</p>
+            <p className="text-red-300 text-sm">{errorMessage}</p>
           </div>
         </div>
       </div>
@@ -156,209 +241,54 @@ export default function TransactionHistory() {
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
         <div>
           <h1 className="text-4xl font-bold text-white mb-2">Histórico de Transações</h1>
-          <p className="text-gray-400 text-lg">
-            Acompanhe todas as transações da plataforma
-          </p>
+          <p className="text-gray-400 text-lg">Acompanhe todas as transações da plataforma</p>
         </div>
+
         <button
-          onClick={handleExport}
-          className="group relative px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-xl font-semibold text-white shadow-lg hover:shadow-violet-500/50 transition-all duration-300 flex items-center gap-2"
+          onClick={exportTransactions}
+          className="group relative px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 rounded-xl"
+          type="button"
         >
-          <Download size={20} />
-          Exportar CSV
+          <span className="font-semibold text-white shadow-lg hover:shadow-violet-500/50 flex items-center gap-2">
+            <Download size={20} />
+            Exportar CSV
+          </span>
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Search */}
-          <div className="relative lg:col-span-2">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="text"
-              placeholder="Buscar por ID, bot ou cliente..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              className="w-full bg-black/50 border border-violet-500/20 rounded-xl pl-12 pr-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500/50 transition-colors"
-            />
-          </div>
+      <TransactionHistoryFilters
+        searchInput={searchInput}
+        statusFilter={statusFilter}
+        dateFrom={dateFrom}
+        dateTo={dateTo}
+        sortOption={sortOption}
+        onSearchInputChange={setSearchInput}
+        onSearch={handleSearch}
+        onStatusFilterChange={setStatusFilter}
+        onSortChange={handleSortChange}
+        onDateFromChange={setDateFrom}
+        onDateToChange={setDateTo}
+      />
 
-          {/* Status Filter */}
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-black/50 border border-violet-500/20 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-violet-500/50 transition-colors"
-          >
-            <option value="all">Todos os Status</option>
-            <option value="completed">Concluídas</option>
-            <option value="processing">Processando</option>
-            <option value="failed">Falhadas</option>
-          </select>
-
-          {/* Sort */}
-          <select
-            value={`${sortBy}-${sortOrder}`}
-            onChange={(e) => {
-              const [field, order] = e.target.value.split('-')
-              setSortBy(field)
-              setSortOrder(order as 'asc' | 'desc')
-            }}
-            className="bg-black/50 border border-violet-500/20 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-violet-500/50 transition-colors"
-          >
-            <option value="createdAt-desc">Mais Recentes</option>
-            <option value="createdAt-asc">Mais Antigas</option>
-            <option value="amountBrl-desc">Maior Valor</option>
-            <option value="amountBrl-asc">Menor Valor</option>
-          </select>
-        </div>
-
-        {/* Date Range */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <div className="relative">
-            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full bg-black/50 border border-violet-500/20 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-violet-500/50 transition-colors"
-            />
-          </div>
-          <div className="relative">
-            <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-            <input
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="w-full bg-black/50 border border-violet-500/20 rounded-xl pl-12 pr-4 py-3 text-white focus:outline-none focus:border-violet-500/50 transition-colors"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Stats */}
       {pagination && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 p-6">
-            <p className="text-gray-400 text-sm mb-1">Total de Transações</p>
-            <p className="text-3xl font-bold text-white">{pagination.total}</p>
-          </div>
-          <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 p-6">
-            <p className="text-gray-400 text-sm mb-1">Valor Total</p>
-            <p className="text-3xl font-bold text-white">
-              R$ {(transactions.reduce((sum, t) => sum + t.amountBrl, 0) / 100).toFixed(2)}
-            </p>
-          </div>
-          <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 p-6">
-            <p className="text-gray-400 text-sm mb-1">Taxa Plataforma</p>
-            <p className="text-3xl font-bold text-white">
-              R$ {(transactions.reduce((sum, t) => sum + t.adminSplit, 0) / 100).toFixed(2)}
-            </p>
-          </div>
-        </div>
+        <TransactionHistoryStats
+          totalTransactions={pagination.total}
+          totalAmount={formatCurrencyFromCents(totalTransactionAmount)}
+          totalPlatformFee={formatCurrencyFromCents(totalPlatformFee)}
+        />
       )}
 
-      {/* Transactions Table */}
-      <div className="bg-gradient-to-br from-zinc-900/50 to-black rounded-2xl border border-violet-500/10 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-black/50">
-              <tr>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  ID
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Bot
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Cliente
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Valor
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Split
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Status
-                </th>
-                <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-4">
-                  Data
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {transactions.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-400">
-                    Nenhuma transação encontrada
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((tx) => (
-                  <tr
-                    key={tx.id}
-                    onClick={() => navigate(`/transacoes/${tx.id}`)}
-                    className="border-t border-zinc-800/50 hover:bg-black/20 transition-colors cursor-pointer"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <p className="text-white font-mono text-sm">{tx.id.slice(0, 8)}...</p>
-                        <ExternalLink className="text-gray-500" size={14} />
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-white font-medium">{tx.botName}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-gray-300">{tx.customerName || 'N/A'}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-white font-semibold">
-                        R$ {(tx.amountBrl / 100).toFixed(2)}
-                      </p>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="space-y-1">
-                        <p className="text-xs text-gray-400">
-                          Merchant: <span className="text-emerald-400">R$ {(tx.merchantSplit / 100).toFixed(2)}</span>
-                        </p>
-                        <p className="text-xs text-gray-400">
-                          Admin: <span className="text-violet-400">R$ {(tx.adminSplit / 100).toFixed(2)}</span>
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      {getStatusBadge(tx.status)}
-                    </td>
-                    <td className="px-6 py-4">
-                      <p className="text-gray-300 text-sm">
-                        {new Date(tx.createdAt).toLocaleString('pt-BR')}
-                      </p>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Pagination */}
-        {pagination && (
-          <Pagination
-            currentPage={pagination.page}
-            totalPages={pagination.totalPages}
-            totalItems={pagination.total}
-            onPageChange={setPage} // setPage atualiza o estado, que dispara o useEffect
-            pageSize={pagination.limit}
-          />
-        )}
-      </div>
+      <TransactionHistoryTable
+        transactions={transactions}
+        pagination={pagination}
+        onOpenTransaction={handleOpenTransaction}
+        onPageChange={setCurrentPage}
+        getStatusBadge={getStatusBadge}
+        formatCurrencyFromCents={formatCurrencyFromCents}
+      />
     </div>
   )
 }

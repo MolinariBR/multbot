@@ -1,4 +1,12 @@
 import type { FastifyDynamicSwaggerOptions } from '@fastify/swagger';
+import type { FastifyApiReferenceOptions } from '@scalar/fastify-api-reference';
+import { env } from './env.js';
+
+const swaggerServerHost = env.HOST === '0.0.0.0' ? 'localhost' : env.HOST;
+const swaggerServerUrl = `http://${swaggerServerHost}:${env.PORT}`;
+const swaggerServerDescription = env.NODE_ENV === 'production'
+    ? 'Servidor de produção'
+    : 'Servidor de desenvolvimento';
 
 export const swaggerOptions: FastifyDynamicSwaggerOptions = {
     openapi: {
@@ -10,8 +18,8 @@ export const swaggerOptions: FastifyDynamicSwaggerOptions = {
         },
         servers: [
             {
-                url: 'http://localhost:3000',
-                description: 'Servidor de desenvolvimento',
+                url: swaggerServerUrl,
+                description: swaggerServerDescription,
             },
         ],
         tags: [
@@ -33,12 +41,12 @@ export const swaggerOptions: FastifyDynamicSwaggerOptions = {
     },
 };
 
-export const scalarOptions = {
+export const scalarApiReferenceOptions: FastifyApiReferenceOptions = {
     routePrefix: '/docs',
+    openApiDocumentEndpoints: {
+        json: '/json',
+    },
     configuration: {
         theme: 'purple',
-        spec: {
-            url: '/docs/json',
-        },
     },
 };

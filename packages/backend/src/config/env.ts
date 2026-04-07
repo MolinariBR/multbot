@@ -1,9 +1,11 @@
 import { z } from 'zod';
 import 'dotenv/config';
 
+const optionalEnvString = z.string().trim().optional().or(z.literal(''));
+
 const envSchema = z.object({
     // Server
-    PORT: z.string().default('3000').transform(Number),
+    PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     HOST: z.string().default('0.0.0.0'),
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 
@@ -20,31 +22,36 @@ const envSchema = z.object({
     ADMIN_NAME: z.string().default('Administrador'),
 
     // Depix (optional for initial setup)
-    DEPIX_API_URL: z.string().optional().or(z.literal('')),
-    DEPIX_API_KEY: z.string().optional().or(z.literal('')),
-    DEPIX_WEBHOOK_SECRET: z.string().optional().or(z.literal('')),
+    DEPIX_API_URL: optionalEnvString,
+    DEPIX_API_KEY: optionalEnvString,
+    DEPIX_WEBHOOK_SECRET: optionalEnvString,
 
     // Telegram (optional for initial setup)
-    TELEGRAM_API_ID: z.string().optional().or(z.literal('')),
-    TELEGRAM_API_HASH: z.string().optional().or(z.literal('')),
-    TELEGRAM_PHONE: z.string().optional().or(z.literal('')),
+    TELEGRAM_API_ID: optionalEnvString,
+    TELEGRAM_API_HASH: optionalEnvString,
+    TELEGRAM_PHONE: optionalEnvString,
 
     // Notifications (optional)
-    TELEGRAM_ADMIN_BOT_TOKEN: z.string().optional().or(z.literal('')),
-    SMTP_HOST: z.string().optional().or(z.literal('')),
-    SMTP_PORT: z.string().optional().or(z.literal('')),
-    SMTP_USER: z.string().optional().or(z.literal('')),
-    SMTP_PASS: z.string().optional().or(z.literal('')),
-    MAIL_FROM: z.string().optional().or(z.literal('')),
-    MAIL_TO_OVERRIDE: z.string().optional().or(z.literal('')),
+    TELEGRAM_ADMIN_BOT_TOKEN: optionalEnvString,
+    SMTP_HOST: optionalEnvString,
+    SMTP_PORT: optionalEnvString,
+    SMTP_USER: optionalEnvString,
+    SMTP_PASS: optionalEnvString,
+    MAIL_FROM: optionalEnvString,
+    MAIL_TO_OVERRIDE: optionalEnvString,
 });
 
-const parsed = envSchema.safeParse(process.env);
+function parseEnvironment() {
+    const parsedEnvironment = envSchema.safeParse(process.env);
 
-if (!parsed.success) {
-    console.error('❌ Variáveis de ambiente inválidas:');
-    console.error(parsed.error.flatten().fieldErrors);
-    process.exit(1);
+    if (parsedEnvironment.success) {
+        return parsedEnvironment.data;
+    }
+
+    const fieldErrors = parsedEnvironment.error.flatten().fieldErrors;
+    const details = JSON.stringify(fieldErrors, null, 2);
+
+    throw new Error(`Variáveis de ambiente inválidas:\n${details}`);
 }
 
-export const env = parsed.data;
+export const env = parseEnvironment();

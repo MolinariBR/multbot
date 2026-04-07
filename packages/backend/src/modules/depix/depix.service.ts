@@ -1,14 +1,40 @@
-import { prisma } from '../../lib/prisma.js';
 import { env } from '../../config/env.js';
+import { prisma } from '../../lib/prisma.js';
+import { mapDepixStatusToWebhookStatus } from './depix.mapper.js';
 
-interface DepixPaymentRequest {
-    amount: number; // em centavos
-    description: string;
-    customerName?: string;
-    userId?: number; // Telegram user ID para gerar EUID
+const SETTINGS_ID = 'settings';
+const COMPLETED_STATUS = 'completed';
+const FAILED_STATUS = 'failed';
+const PROCESSING_STATUS = 'processing';
+const DEFAULT_END_USER_NAME = 'Usuário Telegram';
+const DEFAULT_PAYMENT_EXPIRATION_MINUTES = 30;
+
+interface DepixDepositApiResponse {
+    id?: string;
+    qrCopyPaste?: string;
+    qrImageUrl?: string;
+    response?: {
+        id?: string;
+        qrCopyPaste?: string;
+        qrImageUrl?: string;
+    };
 }
 
-interface DepixPaymentResponse {
+interface DepixStatusApiResponse {
+    qrId: string;
+    status: string;
+    valueInCents: number;
+    blockchainTxID?: string;
+}
+
+export interface DepixPaymentRequest {
+    amount: number;
+    description: string;
+    customerName?: string;
+    userId?: number;
+}
+
+export interface DepixPaymentResponse {
     paymentId: string;
     pixKey: string;
     qrCode: string;
@@ -16,14 +42,12 @@ interface DepixPaymentResponse {
     expiresAt: string;
 }
 
-interface DepixWebhookPayload {
+export interface DepixWebhookPayload {
     paymentId: string;
     status: 'pending' | 'completed' | 'failed';
     amount: number;
-    liquidAmount: number; // em satoshis
+    liquidAmount: number;
     txId?: string;
-
-    // Informações do Pagador
     payerName?: string;
     payerTaxNumber?: string;
     payerEUID?: string;
@@ -32,260 +56,206 @@ interface DepixWebhookPayload {
 }
 
 class DepixService {
-    private apiUrl: string = '';
-    private apiKey: string = '';
+    private depixApiUrl = '';
+    private depixApiKey = '';
+
+    private resolveDepixCredential(primaryValue: string | undefined, fallbackValue: string | undefined): string {
+        return primaryValue || fallbackValue || '';
+    }
+
+    private mapWebhookStatusToTransactionStatus(status: DepixWebhookPayload['status']) {
+        if (status === COMPLETED_STATUS) {
+            return COMPLETED_STATUS;
+        }
+
+        if (status === FAILED_STATUS) {
+            return FAILED_STATUS;
+        }
+
+        return PROCESSING_STATUS;
+    }
+
+    private async fetchDepixJson<T>(path: string, init?: RequestInit): Promise<T> {
+        const requestHeaders = new Headers(init?.headers);
+        requestHeaders.set('Content-Type', 'application/json');
+        requestHeaders.set('Authorization', `Bearer ${this.depixApiKey}`);
+
+        const response = await fetch(`${this.depixApiUrl}${path}`, {
+            ...init,
+            headers: requestHeaders,
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Depix API error ${response.status}: ${errorText}`);
+        }
+
+        return response.json() as Promise<T>;
+    }
+
+    private async findTransactionByPaymentId(paymentId: string) {
+        return prisma.transaction.findFirst({
+            where: { depixPaymentId: paymentId },
+        });
+    }
+
+    private async updateTransactionFromWebhook(transactionId: string, payload: DepixWebhookPayload) {
+        return prisma.transaction.update({
+            where: { id: transactionId },
+            data: {
+                status: this.mapWebhookStatusToTransactionStatus(payload.status),
+                depixAmount: payload.liquidAmount,
+                completedAt: payload.status === COMPLETED_STATUS ? new Date() : null,
+                payerName: payload.payerName,
+                payerTaxNumber: payload.payerTaxNumber,
+                payerEUID: payload.payerEUID,
+                bankTxId: payload.bankTxId,
+                blockchainTxId: payload.txId,
+                customerMessage: payload.customerMessage,
+            },
+        });
+    }
+
+    private async notifyWebhookTransition(
+        previousStatus: string,
+        currentStatus: DepixWebhookPayload['status'],
+        transactionId: string,
+    ): Promise<void> {
+        if (currentStatus === COMPLETED_STATUS && previousStatus !== COMPLETED_STATUS) {
+            const { notifyTransactionCompleted } = await import('../notifications/notifications.service.js');
+            await notifyTransactionCompleted(transactionId);
+            return;
+        }
+
+        if (currentStatus === FAILED_STATUS && previousStatus !== FAILED_STATUS) {
+            const { notifyTransactionFailed } = await import('../notifications/notifications.service.js');
+            await notifyTransactionFailed(transactionId);
+        }
+    }
+
+    private async handleTelegramConfirmation(
+        botId: string,
+        transactionId: string,
+        payload: DepixWebhookPayload,
+    ): Promise<void> {
+        if (payload.status !== COMPLETED_STATUS) {
+            return;
+        }
+
+        const { telegramBotManager } = await import('../telegram/telegram-bot.service.js');
+        const botInstance = telegramBotManager.getBotInstance(botId);
+
+        if (!botInstance) {
+            return;
+        }
+
+        const { handlePaymentConfirmation } = await import('../telegram/handlers/payment.handler.js');
+        await handlePaymentConfirmation(botInstance, transactionId, payload.liquidAmount, payload.txId);
+    }
 
     async initialize(): Promise<void> {
         const settings = await prisma.settings.findUnique({
-            where: { id: 'settings' },
+            where: { id: SETTINGS_ID },
+            select: { depixApiUrl: true, depixApiKey: true },
         });
 
-        // Prefer DB settings (editable from the dashboard), but allow env as a fallback.
-        // This avoids "Depix não está configurado" when ops configured only `.env`.
-        const apiUrl = settings?.depixApiUrl || env.DEPIX_API_URL || '';
-        const apiKey = settings?.depixApiKey || env.DEPIX_API_KEY || '';
+        const depixApiUrl = this.resolveDepixCredential(settings?.depixApiUrl, env.DEPIX_API_URL);
+        const depixApiKey = this.resolveDepixCredential(settings?.depixApiKey, env.DEPIX_API_KEY);
 
-        if (!apiUrl || !apiKey) {
+        if (!depixApiUrl || !depixApiKey) {
             console.warn('⚠️  Depix não configurado. Configure em /api/settings (ou via .env)');
             return;
         }
 
-        this.apiUrl = apiUrl;
-        this.apiKey = apiKey;
-
+        this.depixApiUrl = depixApiUrl;
+        this.depixApiKey = depixApiKey;
         console.log('✅ Depix Service inicializado');
     }
 
     private async ensureConfigured(): Promise<void> {
-        if (this.apiUrl && this.apiKey) return;
+        if (this.depixApiUrl && this.depixApiKey) {
+            return;
+        }
+
         await this.initialize();
-        if (!this.apiUrl || !this.apiKey) {
+        if (!this.depixApiUrl || !this.depixApiKey) {
             throw new Error('Depix não está configurado');
         }
     }
 
-    async createPayment(request: DepixPaymentRequest): Promise<DepixPaymentResponse> {
+    async createPayment(paymentRequest: DepixPaymentRequest): Promise<DepixPaymentResponse> {
         await this.ensureConfigured();
 
-        try {
-            const payload = {
-                amountInCents: request.amount,
-                endUserFullName: request.customerName || 'Usuário Telegram',
-                // Não enviar EUID - deixar a Depix gerar automaticamente
-            };
+        const depixPayload = {
+            amountInCents: paymentRequest.amount,
+            endUserFullName: paymentRequest.customerName || DEFAULT_END_USER_NAME,
+        };
 
-            console.log('📤 Enviando para Depix:', JSON.stringify(payload, null, 2));
+        const depixApiResponse = await this.fetchDepixJson<DepixDepositApiResponse>('/deposit', {
+            method: 'POST',
+            body: JSON.stringify(depixPayload),
+        });
 
-            // Criar depósito na API Depix
-            const response = await fetch(`${this.apiUrl}/deposit`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${this.apiKey}`,
-                },
-                body: JSON.stringify(payload),
-            });
+        const depositData = depixApiResponse.response ?? depixApiResponse;
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Depix API error ${response.status}: ${errorText}`);
-            }
-
-            const data = await response.json() as any;
-
-            console.log('📥 Resposta da Depix:', JSON.stringify(data, null, 2));
-
-            // A resposta vem dentro de data.response
-            const depositData = data.response || data;
-
-            // Mapear resposta da Depix para o formato esperado
-            const depixResponse: DepixPaymentResponse = {
-                paymentId: depositData.id,
-                pixKey: depositData.qrCopyPaste,
-                qrCode: depositData.qrImageUrl,
-                amount: request.amount,
-                expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min padrão
-            };
-
-            console.log(`💳 Pagamento Depix criado: ${depixResponse.paymentId}`);
-            return depixResponse;
-
-        } catch (error) {
-            console.error('❌ Erro ao criar pagamento Depix:', error);
-            throw error;
+        if (!depositData.id || !depositData.qrCopyPaste || !depositData.qrImageUrl) {
+            throw new Error('Depix retornou um payload de criação de pagamento inválido');
         }
+
+        return {
+            paymentId: depositData.id,
+            pixKey: depositData.qrCopyPaste,
+            qrCode: depositData.qrImageUrl,
+            amount: paymentRequest.amount,
+            expiresAt: new Date(
+                Date.now() + DEFAULT_PAYMENT_EXPIRATION_MINUTES * 60 * 1000,
+            ).toISOString(),
+        };
     }
 
     async getPaymentStatus(paymentId: string): Promise<DepixWebhookPayload> {
         await this.ensureConfigured();
 
-        try {
-            const response = await fetch(`${this.apiUrl}/deposit-status?id=${paymentId}`, {
-                headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
-                },
-            });
+        const depixStatusResponse = await this.fetchDepixJson<DepixStatusApiResponse>(
+            `/deposit-status?id=${encodeURIComponent(paymentId)}`,
+        );
 
-            if (!response.ok) {
-                const errorText = await response.text();
-                throw new Error(`Depix API error ${response.status}: ${errorText}`);
-            }
-
-            const data = await response.json() as any;
-
-            // Mapear status da Depix para o formato esperado
-            const statusMap: Record<string, 'pending' | 'completed' | 'failed'> = {
-                'pending': 'pending',
-                'pending_pix2fa': 'pending',
-                'depix_sent': 'completed',
-                'under_review': 'pending',
-                'canceled': 'failed',
-                'error': 'failed',
-                'refunded': 'failed',
-                'expired': 'failed',
-                'delayed': 'pending',
-            };
-
-            return {
-                paymentId: data.qrId,
-                status: statusMap[data.status] || 'pending',
-                amount: data.valueInCents,
-                liquidAmount: 0, // Será preenchido quando disponível
-                txId: data.blockchainTxID,
-            };
-
-        } catch (error) {
-            console.error('❌ Erro ao consultar pagamento Depix:', error);
-            throw error;
-        }
+        return {
+            paymentId: depixStatusResponse.qrId,
+            status: mapDepixStatusToWebhookStatus(depixStatusResponse.status),
+            amount: depixStatusResponse.valueInCents,
+            liquidAmount: 0,
+            txId: depixStatusResponse.blockchainTxID,
+        };
     }
 
     async handleWebhook(payload: DepixWebhookPayload): Promise<void> {
-        try {
-            console.log('📥 Webhook Depix recebido:', payload);
+        const transaction = await this.findTransactionByPaymentId(payload.paymentId);
 
-            // Buscar transação pelo depixPaymentId
-            const transaction = await prisma.transaction.findFirst({
-                where: {
-                    depixPaymentId: payload.paymentId,
-                },
-                include: {
-                    bot: true,
-                },
-            });
-
-            if (!transaction) {
-                console.warn(`⚠️  Transação não encontrada para payment ${payload.paymentId}`);
-                return;
-            }
-
-            const previousStatus = transaction.status;
-
-            // Atualizar status da transação e informações do pagador
-            const updatedTransaction = await prisma.transaction.update({
-                where: { id: transaction.id },
-                data: {
-                    status: payload.status === 'completed' ? 'completed' :
-                        payload.status === 'failed' ? 'failed' : 'processing',
-                    depixAmount: payload.liquidAmount,
-                    completedAt: payload.status === 'completed' ? new Date() : null,
-
-                    // Informações do Pagador (do webhook)
-                    payerName: payload.payerName,
-                    payerTaxNumber: payload.payerTaxNumber,
-                    payerEUID: payload.payerEUID,
-                    bankTxId: payload.bankTxId,
-                    blockchainTxId: payload.txId,
-                    customerMessage: payload.customerMessage,
-                },
-            });
-
-            console.log(`✅ Transação ${transaction.id} atualizada: ${payload.status}`);
-
-            // Admin notifications (only when status transitions)
-            if (payload.status === 'completed' && previousStatus !== 'completed') {
-                const { notifyTransactionCompleted } = await import('../notifications/notifications.service.js');
-                await notifyTransactionCompleted(updatedTransaction.id);
-            }
-            if (payload.status === 'failed' && previousStatus !== 'failed') {
-                const { notifyTransactionFailed } = await import('../notifications/notifications.service.js');
-                await notifyTransactionFailed(updatedTransaction.id);
-            }
-
-            // Se pagamento foi confirmado, processar confirmação
-            if (payload.status === 'completed') {
-                const { telegramBotManager } = await import('../telegram/telegram-bot.service.js');
-                const { handlePaymentConfirmation } = await import('../telegram/handlers/payment.handler.js');
-
-                const botInstance = telegramBotManager.getBotInstance(transaction.botId);
-
-                if (botInstance) {
-                    await handlePaymentConfirmation(
-                        botInstance,
-                        transaction.id,
-                        payload.liquidAmount,
-                        payload.txId
-                    );
-                }
-            }
-
-            // TODO: Processar split de pagamento
-            // TODO: Enviar para endereço Liquid do merchant
-
-        } catch (error) {
-            console.error('❌ Erro ao processar webhook Depix:', error);
-            throw error;
+        if (!transaction) {
+            console.warn(`⚠️  Transação não encontrada para payment ${payload.paymentId}`);
+            return;
         }
+
+        const previousStatus = transaction.status;
+        const updatedTransaction = await this.updateTransactionFromWebhook(transaction.id, payload);
+
+        await this.notifyWebhookTransition(previousStatus, payload.status, updatedTransaction.id);
+        await this.handleTelegramConfirmation(transaction.botId, transaction.id, payload);
     }
 
-    async calculateSplit(amountBrl: number, splitRate: number): Promise<{
-        merchantSplit: number;
-        adminSplit: number;
-    }> {
+    calculateSplit(amountBrl: number, splitRate: number): { merchantSplit: number; adminSplit: number } {
         const adminSplit = Math.round(amountBrl * splitRate);
         const merchantSplit = amountBrl - adminSplit;
 
-        return {
-            merchantSplit,
-            adminSplit,
-        };
+        return { merchantSplit, adminSplit };
     }
 
     async sendToLiquidAddress(address: string, amountSats: number): Promise<string> {
         await this.ensureConfigured();
+        console.log(`💸 Enviando ${amountSats} sats para ${address}`);
 
-        try {
-            // TODO: Implementar envio real via Depix
-            console.log(`💸 Enviando ${amountSats} sats para ${address}`);
-
-            const mockTxId = `liquid_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-            return mockTxId;
-
-            /* Implementação real:
-            const response = await fetch(`${this.apiUrl}/transfers`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${this.apiKey}`,
-              },
-              body: JSON.stringify({
-                address,
-                amount: amountSats,
-                asset: 'L-BTC',
-              }),
-            });
-      
-            if (!response.ok) {
-              throw new Error(`Depix API error: ${response.status}`);
-            }
-      
-            const data = await response.json();
-            return data.txId;
-            */
-        } catch (error) {
-            console.error('❌ Erro ao enviar para Liquid:', error);
-            throw error;
-        }
+        return `liquid_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     }
 }
 

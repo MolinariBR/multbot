@@ -1,45 +1,39 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { loginSchema } from './auth.schema.js';
-import * as authService from './auth.service.js';
+import { login } from './auth.service.js';
+import {
+    loginBodyJsonSchema,
+    loginSchema,
+    loginSuccessResponseJsonSchema,
+} from './auth.schema.js';
 import { ValidationError } from '../../lib/error.js';
+
+function normalizeFieldErrors(
+    fieldErrors: Record<string, string[] | undefined>,
+): Record<string, string[]> {
+    return Object.fromEntries(
+        Object.entries(fieldErrors).map(([field, errors]) => [field, errors ?? []]),
+    );
+}
 
 export const authRoutes: FastifyPluginAsync = async (app) => {
     app.post('/login', {
         schema: {
             tags: ['Auth'],
             summary: 'Login do administrador',
-            body: {
-                type: 'object',
-                required: ['email', 'password'],
-                properties: {
-                    email: { type: 'string', format: 'email' },
-                    password: { type: 'string', minLength: 6 },
-                },
-            },
+            body: loginBodyJsonSchema,
             response: {
-                200: {
-                    type: 'object',
-                    properties: {
-                        accessToken: { type: 'string' },
-                        admin: {
-                            type: 'object',
-                            properties: {
-                                email: { type: 'string' },
-                                name: { type: 'string' },
-                            },
-                        },
-                    },
-                },
+                200: loginSuccessResponseJsonSchema,
             },
         },
     }, async (request, reply) => {
-        const parsed = loginSchema.safeParse(request.body);
+        const parsedLoginInput = loginSchema.safeParse(request.body);
 
-        if (!parsed.success) {
-            throw new ValidationError('Dados inválidos', parsed.error.flatten().fieldErrors as any);
+        if (!parsedLoginInput.success) {
+            const fieldErrors = normalizeFieldErrors(parsedLoginInput.error.flatten().fieldErrors);
+            throw new ValidationError('Dados inválidos', fieldErrors);
         }
 
-        const result = await authService.login(parsed.data);
+        const result = await login(parsedLoginInput.data);
         return reply.send(result);
     });
 };

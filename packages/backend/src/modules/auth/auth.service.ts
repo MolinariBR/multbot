@@ -4,10 +4,16 @@ import { signToken } from '../../lib/jwt.js';
 import { UnauthorizedError } from '../../lib/error.js';
 import type { LoginInput } from './auth.schema.js';
 
-export async function login(input: LoginInput) {
-    const { email, password } = input;
+const INVALID_CREDENTIALS_ERROR_MESSAGE = 'Email ou senha inválidos';
 
-    // Buscar admin por email
+interface AdminForLogin {
+    id: string;
+    email: string;
+    password: string;
+    name: string;
+}
+
+async function findAdminForLogin(email: string): Promise<AdminForLogin> {
     const admin = await prisma.admin.findUnique({
         where: { email },
         select: {
@@ -19,27 +25,36 @@ export async function login(input: LoginInput) {
     });
 
     if (!admin) {
-        throw new UnauthorizedError('Email ou senha inválidos');
+        throw new UnauthorizedError(INVALID_CREDENTIALS_ERROR_MESSAGE);
     }
 
-    // Verificar senha
-    const isValid = await comparePassword(password, admin.password);
+    return admin;
+}
 
-    if (!isValid) {
-        throw new UnauthorizedError('Email ou senha inválidos');
+async function validatePasswordOrThrow(plainPassword: string, hashedPassword: string): Promise<void> {
+    const isPasswordValid = await comparePassword(plainPassword, hashedPassword);
+
+    if (!isPasswordValid) {
+        throw new UnauthorizedError(INVALID_CREDENTIALS_ERROR_MESSAGE);
     }
+}
 
-    // Gerar token
-    const accessToken = signToken({
-        sub: admin.id,
-        email: admin.email,
-    });
-
+function buildLoginResponse(admin: Pick<AdminForLogin, 'id' | 'email' | 'name'>) {
     return {
-        accessToken,
+        accessToken: signToken({
+            sub: admin.id,
+            email: admin.email,
+        }),
         admin: {
             email: admin.email,
             name: admin.name,
         },
     };
+}
+
+export async function login(input: LoginInput) {
+    const { email, password } = input;
+    const admin = await findAdminForLogin(email);
+    await validatePasswordOrThrow(password, admin.password);
+    return buildLoginResponse(admin);
 }

@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
 import scalarPlugin from '@scalar/fastify-api-reference';
 import { corsOptions } from './config/cors.js';
-import { swaggerOptions, scalarOptions } from './config/swagger.js';
+import { swaggerOptions, scalarApiReferenceOptions } from './config/swagger.js';
 import { AppError } from './lib/error.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { dashboardRoutes } from './modules/dashboard/dashboard.routes.js';
@@ -29,7 +29,7 @@ export async function buildApp() {
     // Plugins
     await app.register(cors, corsOptions);
     await app.register(swagger, swaggerOptions);
-    await app.register(scalarPlugin, scalarOptions as any);
+    await app.register(scalarPlugin, scalarApiReferenceOptions);
 
     // Auth hook (protege rotas)
     app.addHook('onRequest', authHook);

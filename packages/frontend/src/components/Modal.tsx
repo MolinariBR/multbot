@@ -1,11 +1,13 @@
-import { ReactNode, useEffect } from 'react';
+import { ReactNode } from 'react';
 import { X } from 'lucide-react';
+import { useModalKeyboard } from './useModalKeyboard';
+import { useModalScrollLock } from './useModalScrollLock';
 
 interface ModalProps {
     isOpen: boolean;
     onClose: () => void;
     title: string;
-    icon?: ReactNode; // Ícone opcional no header
+    icon?: ReactNode;
     children: ReactNode;
     maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
 }
@@ -18,26 +20,12 @@ export default function Modal({
     children,
     maxWidth = 'md'
 }: ModalProps) {
-    // Fechar modal com tecla ESC
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-
-        if (isOpen) {
-            document.addEventListener('keydown', handleEsc);
-            document.body.style.overflow = 'hidden'; // Bloquear scroll do body
-        }
-
-        return () => {
-            document.removeEventListener('keydown', handleEsc);
-            document.body.style.overflow = 'unset';
-        };
-    }, [isOpen, onClose]);
+    useModalKeyboard(isOpen, onClose);
+    useModalScrollLock(isOpen);
 
     if (!isOpen) return null;
 
-    const maxWidthClasses = {
+    const maxWidthClassMap = {
         sm: 'max-w-sm',
         md: 'max-w-md',
         lg: 'max-w-lg',
@@ -47,13 +35,16 @@ export default function Modal({
 
     return (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-            {/* Container Principal */}
             <div
-                className={`bg-gradient-to-br from-zinc-900 to-black rounded-2xl border border-violet-500/20 w-full max-h-[90vh] overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-200 ${maxWidthClasses[maxWidth]}`}
+                className={`
+                    bg-gradient-to-br from-zinc-900 to-black rounded-2xl
+                    border border-violet-500/20 w-full max-h-[90vh]
+                    overflow-y-auto shadow-2xl animate-in zoom-in-95 duration-200
+                    ${maxWidthClassMap[maxWidth]}
+                `}
                 role="dialog"
                 aria-modal="true"
             >
-                {/* Header Fixo */}
                 <div className="sticky top-0 bg-gradient-to-br from-zinc-900 to-black border-b border-violet-500/20 p-6 flex items-center justify-between z-10">
                     <div className="flex items-center gap-3">
                         {icon && (
@@ -74,7 +65,6 @@ export default function Modal({
                     </button>
                 </div>
 
-                {/* Conteúdo */}
                 <div className="p-6">
                     {children}
                 </div>

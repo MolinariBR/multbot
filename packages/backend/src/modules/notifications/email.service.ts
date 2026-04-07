@@ -1,49 +1,92 @@
 import nodemailer from 'nodemailer';
 import { env } from '../../config/env.js';
 
-function getSmtpConfig() {
-    const host = env.SMTP_HOST || '';
-    const portStr = env.SMTP_PORT || '';
-    const user = env.SMTP_USER || '';
-    const pass = env.SMTP_PASS || '';
-    const from = env.MAIL_FROM || '';
+type SmtpConfig = {
+    host: string;
+    port: number;
+    smtpUser: string;
+    smtpPassword: string;
+    senderEmail: string;
+};
 
-    const port = portStr ? Number(portStr) : NaN;
-
-    return { host, port, user, pass, from };
-}
-
-export function isEmailConfigured(): boolean {
-    const { host, port, user, pass, from } = getSmtpConfig();
-    return Boolean(host && Number.isFinite(port) && user && pass && from);
-}
-
-export async function sendEmail(params: {
+type SendEmailInput = {
     to: string[];
     subject: string;
     text: string;
-}): Promise<void> {
-    const { host, port, user, pass, from } = getSmtpConfig();
+};
 
-    if (!isEmailConfigured()) {
-        throw new Error('Email (SMTP) não configurado. Defina SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/MAIL_FROM.');
+function getSmtpConfig(): SmtpConfig {
+    const host = env.SMTP_HOST || '';
+    const portStr = env.SMTP_PORT || '';
+    const smtpUser = env.SMTP_USER || '';
+    const smtpPassword = env.SMTP_PASS || '';
+    const senderEmail = env.MAIL_FROM || '';
+
+    const port = portStr ? Number(portStr) : NaN;
+
+    return { host, port, smtpUser, smtpPassword, senderEmail };
+}
+
+function hasValidSmtpConfig(config: SmtpConfig): boolean {
+    return Boolean(
+        config.host
+        && Number.isFinite(config.port)
+        && config.smtpUser
+        && config.smtpPassword
+        && config.senderEmail,
+    );
+}
+
+function assertSmtpConfigOrThrow(config: SmtpConfig): void {
+    if (hasValidSmtpConfig(config)) {
+        return;
     }
 
-    const transport = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user, pass },
-    });
+    throw new Error(
+        'Email (SMTP) não configurado. Defina SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS/MAIL_FROM.',
+    );
+}
 
-    const to = (env.MAIL_TO_OVERRIDE ? [env.MAIL_TO_OVERRIDE] : params.to).filter(Boolean);
-    if (to.length === 0) return;
+function resolveRecipients(defaultRecipients: string[]): string[] {
+    const overrideRecipient = env.MAIL_TO_OVERRIDE?.trim();
+    const recipients = overrideRecipient ? [overrideRecipient] : defaultRecipients;
 
-    await transport.sendMail({
-        from,
-        to,
-        subject: params.subject,
-        text: params.text,
+    return recipients.map((emailAddress) => emailAddress.trim()).filter(Boolean);
+}
+
+function createSmtpTransport(config: SmtpConfig) {
+    return nodemailer.createTransport({
+        host: config.host,
+        port: config.port,
+        secure: config.port === 465,
+        auth: { user: config.smtpUser, pass: config.smtpPassword },
     });
 }
 
+export function isEmailConfigured(): boolean {
+    return hasValidSmtpConfig(getSmtpConfig());
+}
+
+export async function sendEmail(input: SendEmailInput): Promise<void> {
+    const smtpConfig = getSmtpConfig();
+    assertSmtpConfigOrThrow(smtpConfig);
+
+    const recipients = resolveRecipients(input.to);
+    if (recipients.length === 0) {
+        throw new Error('Nenhum destinatário de email válido foi informado.');
+    }
+
+    const smtpTransport = createSmtpTransport(smtpConfig);
+
+    try {
+        await smtpTransport.sendMail({
+            from: smtpConfig.senderEmail,
+            to: recipients,
+            subject: input.subject,
+            text: input.text,
+        });
+    } catch (error: unknown) {
+        const errorMessage = error instanceof Error ? error.message : 'erro desconhecido';
+        throw new Error(`Falha ao enviar email para ${recipients.join(', ')}: ${errorMessage}`);
+    }
+}

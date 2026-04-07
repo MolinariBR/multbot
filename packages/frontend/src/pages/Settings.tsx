@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Save, Lock, Zap, Bell, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api';
 import toast from 'react-hot-toast';
@@ -16,6 +16,11 @@ interface SettingsData {
     notifyEmail: boolean;
     notifyTelegram: boolean;
     notifyMinAmount: number;
+}
+
+interface AdminTelegram {
+    email: string;
+    telegramLinked: boolean;
 }
 
 export default function Settings() {
@@ -43,63 +48,63 @@ export default function Settings() {
     const [adminsTelegram, setAdminsTelegram] = useState<Array<{ email: string; telegramLinked: boolean }>>([]);
     const [telegramBotReady, setTelegramBotReady] = useState<boolean>(false);
 
-    useEffect(() => {
-        loadSettings();
+    const convertSettingsData = useCallback((data: unknown) => {
+        const settings = data as SettingsData;
+        // Ajuste para taxas se vierem em decimal
+        if (settings.defaultSplitRate < 1) settings.defaultSplitRate *= 100;
+        if (settings.minSplitRate < 1) settings.minSplitRate *= 100;
+        if (settings.maxSplitRate < 1) settings.maxSplitRate *= 100;
+
+        // Notificações: backend usa centavos, UI usa R$
+        if (typeof settings.notifyMinAmount === 'number') {
+            settings.notifyMinAmount = settings.notifyMinAmount / 100;
+        } else {
+            settings.notifyMinAmount = 0;
+        }
+
+        return settings;
     }, []);
 
-    const loadSettings = async () => {
+    const convertAdminsData = useCallback((admins: unknown[]) => {
+        return admins.map((a) => {
+            const admin = a as AdminTelegram;
+            return {
+                email: admin.email,
+                telegramLinked: Boolean(admin.telegramLinked),
+            };
+        });
+    }, []);
+
+    const loadSettings = useCallback(async () => {
         try {
             setLoading(true);
             const [settingsRes, adminsRes] = await Promise.all([
                 api.get('/settings'),
                 api.get('/notifications/admins'),
             ]);
-            // Converter taxas de decimal para porcentagem se necessário
-            // O backend retorna como está no banco (pode ser 0.10 ou 10 dependendo da implementação)
-            // Assumindo que o endpoint /settings retorna os dados crus
 
-            const data = settingsRes.data;
-
-            // Ajuste para taxas se vierem em decimal
-            if (data.defaultSplitRate < 1) data.defaultSplitRate *= 100;
-            if (data.minSplitRate < 1) data.minSplitRate *= 100;
-            if (data.maxSplitRate < 1) data.maxSplitRate *= 100;
-
-            // Notificações: backend usa centavos, UI usa R$
-            if (typeof data.notifyMinAmount === 'number') {
-                data.notifyMinAmount = data.notifyMinAmount / 100;
-            } else {
-                data.notifyMinAmount = 0;
-            }
-
-            setFormData(data);
-
+            const convertedData = convertSettingsData(settingsRes.data);
+            setFormData(convertedData);
             setTelegramBotReady(Boolean(adminsRes.data?.telegramBotReady));
-            setAdminsTelegram((adminsRes.data?.admins || []).map((a: any) => ({
-                email: a.email,
-                telegramLinked: Boolean(a.telegramLinked),
-            })));
+            setAdminsTelegram(convertAdminsData(adminsRes.data?.admins || []));
         } catch (error) {
             console.error('Erro ao carregar configurações:', error);
             toast.error('Erro ao carregar configurações');
         } finally {
             setLoading(false);
         }
-    };
+    }, [convertSettingsData, convertAdminsData]);
+
+    useEffect(() => {
+        loadSettings();
+    }, [loadSettings]);
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
         try {
             setSaving(true);
 
-            // Preparar dados para envio (converter % para decimal)
-            const payload = {
-                ...formData,
-                defaultSplitRate: formData.defaultSplitRate / 100,
-                minSplitRate: formData.minSplitRate / 100,
-                maxSplitRate: formData.maxSplitRate / 100,
-                notifyMinAmount: Math.round((formData.notifyMinAmount || 0) * 100),
-            };
+            const payload = preparePayloadForSave(formData);
 
             await api.put('/settings', payload);
             toast.success('Configurações salvas com sucesso!');
@@ -110,6 +115,14 @@ export default function Settings() {
             setSaving(false);
         }
     };
+
+    const preparePayloadForSave = (data: SettingsData) => ({
+        ...data,
+        defaultSplitRate: data.defaultSplitRate / 100,
+        minSplitRate: data.minSplitRate / 100,
+        maxSplitRate: data.maxSplitRate / 100,
+        notifyMinAmount: Math.round((data.notifyMinAmount || 0) * 100),
+    });
 
     const handleGeneratePairingCode = async () => {
         try {
@@ -127,8 +140,9 @@ export default function Settings() {
         try {
             await api.post('/notifications/test-email');
             toast.success('Email de teste enviado!');
-        } catch (error: any) {
-            toast.error(error?.response?.data?.error || 'Falha ao enviar email de teste');
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Erro desconhecido';
+            toast.error(message || 'Falha ao enviar email de teste');
         }
     };
 
@@ -136,8 +150,9 @@ export default function Settings() {
         try {
             await api.post('/notifications/test-telegram');
             toast.success('Telegram de teste enviado!');
-        } catch (error: any) {
-            toast.error(error?.response?.data?.error || 'Falha ao enviar Telegram de teste');
+        } catch (error: unknown) {
+            const message = error instanceof Error ? error.message : 'Erro desconhecido';
+            toast.error(message || 'Falha ao enviar Telegram de teste');
         }
     };
 

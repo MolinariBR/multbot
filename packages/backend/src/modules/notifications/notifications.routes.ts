@@ -1,35 +1,72 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { SafeParseReturnType } from 'zod';
 import { ValidationError } from '../../lib/error.js';
 import { prisma } from '../../lib/prisma.js';
 import { adminTelegramBot } from './admin-telegram-bot.service.js';
-import * as notificationsService from './notifications.service.js';
+import {
+    limitQueryJsonSchema,
+    limitQuerySchema,
+    pairingCodeResponseJsonSchema,
+    successResponseJsonSchema,
+} from './notifications.schema.js';
+import {
+    createTelegramPairingCode,
+    sendTestEmail,
+    sendTestTelegram,
+} from './notifications.service.js';
+
+function normalizeFieldErrors(
+    fieldErrors: Record<string, string[] | undefined>,
+): Record<string, string[]> {
+    return Object.fromEntries(
+        Object.entries(fieldErrors).map(([field, errors]) => [field, errors ?? []]),
+    );
+}
+
+function parseSchemaOrThrow<T>(parsedResult: SafeParseReturnType<unknown, T>): T {
+    if (parsedResult.success) {
+        return parsedResult.data;
+    }
+
+    const fieldErrors = normalizeFieldErrors(parsedResult.error.flatten().fieldErrors);
+    throw new ValidationError('Dados inválidos', fieldErrors);
+}
+
+function getAuthenticatedAdminIdOrThrow(request: FastifyRequest): string {
+    const adminId = request.user?.sub;
+
+    if (!adminId) {
+        throw new ValidationError('Admin inválido');
+    }
+
+    return adminId;
+}
+
+function getErrorMessage(error: unknown, fallbackMessage: string): string {
+    if (error instanceof Error && error.message) {
+        return error.message;
+    }
+
+    return fallbackMessage;
+}
 
 export const notificationsRoutes: FastifyPluginAsync = async (app) => {
-    // POST /api/notifications/telegram/pairing-code
     app.post('/telegram/pairing-code', {
         schema: {
             tags: ['Notifications'],
             summary: 'Gerar código para vincular Telegram (admin)',
             security: [{ bearerAuth: [] }],
             response: {
-                200: {
-                    type: 'object',
-                    properties: {
-                        code: { type: 'string' },
-                        expiresAt: { type: 'string' },
-                    },
-                },
+                200: pairingCodeResponseJsonSchema,
             },
         },
     }, async (request, reply) => {
-        const adminId = (request as any).user?.sub as string | undefined;
-        if (!adminId) throw new ValidationError('Admin inválido');
+        const adminId = getAuthenticatedAdminIdOrThrow(request);
+        const { code, expiresAt } = await createTelegramPairingCode(adminId);
 
-        const { code, expiresAt } = await notificationsService.createTelegramPairingCode(adminId);
         return reply.send({ code, expiresAt: expiresAt.toISOString() });
     });
 
-    // GET /api/notifications/admins
     app.get('/admins', {
         schema: {
             tags: ['Notifications'],
@@ -44,99 +81,85 @@ export const notificationsRoutes: FastifyPluginAsync = async (app) => {
 
         return reply.send({
             telegramBotReady: adminTelegramBot.isReady(),
-            admins: admins.map(a => ({
-                id: a.id,
-                email: a.email,
-                name: a.name,
-                telegramLinked: Boolean(a.telegramChatId),
-                telegramLinkedAt: a.telegramLinkedAt,
+            admins: admins.map((admin) => ({
+                id: admin.id,
+                email: admin.email,
+                name: admin.name,
+                telegramLinked: Boolean(admin.telegramChatId),
+                telegramLinkedAt: admin.telegramLinkedAt,
             })),
         });
     });
 
-    // POST /api/notifications/test-email
     app.post('/test-email', {
         schema: {
             tags: ['Notifications'],
             summary: 'Enviar email de teste (somente para o admin logado)',
             security: [{ bearerAuth: [] }],
+            response: {
+                200: successResponseJsonSchema,
+            },
         },
     }, async (request, reply) => {
-        const adminId = (request as any).user?.sub as string | undefined;
-        if (!adminId) throw new ValidationError('Admin inválido');
+        const adminId = getAuthenticatedAdminIdOrThrow(request);
 
         try {
-            await notificationsService.sendTestEmail(adminId);
+            await sendTestEmail(adminId);
             return reply.send({ success: true });
-        } catch (err: any) {
-            throw new ValidationError(err?.message || 'Falha ao enviar email de teste');
+        } catch (error: unknown) {
+            throw new ValidationError(getErrorMessage(error, 'Falha ao enviar email de teste'));
         }
     });
 
-    // POST /api/notifications/test-telegram
     app.post('/test-telegram', {
         schema: {
             tags: ['Notifications'],
             summary: 'Enviar Telegram de teste (somente para o admin logado)',
             security: [{ bearerAuth: [] }],
+            response: {
+                200: successResponseJsonSchema,
+            },
         },
     }, async (request, reply) => {
-        const adminId = (request as any).user?.sub as string | undefined;
-        if (!adminId) throw new ValidationError('Admin inválido');
+        const adminId = getAuthenticatedAdminIdOrThrow(request);
 
         try {
-            await notificationsService.sendTestTelegram(adminId);
+            await sendTestTelegram(adminId);
             return reply.send({ success: true });
-        } catch (err: any) {
-            throw new ValidationError(err?.message || 'Falha ao enviar Telegram de teste');
+        } catch (error: unknown) {
+            throw new ValidationError(getErrorMessage(error, 'Falha ao enviar Telegram de teste'));
         }
     });
 
-    // GET /api/notifications/events
     app.get('/events', {
         schema: {
             tags: ['Notifications'],
             summary: 'Listar eventos de notificação (auditoria)',
             security: [{ bearerAuth: [] }],
-            querystring: {
-                type: 'object',
-                properties: {
-                    limit: { type: 'string' },
-                },
-            },
+            querystring: limitQueryJsonSchema,
         },
     }, async (request, reply) => {
-        const limitStr = (request.query as any)?.limit;
-        const limit = Math.min(Math.max(Number(limitStr || 50), 1), 200);
-
+        const query = parseSchemaOrThrow(limitQuerySchema.safeParse(request.query));
         const events = await prisma.notificationEvent.findMany({
             orderBy: { createdAt: 'desc' },
-            take: limit,
+            take: query.limit,
         });
 
         return reply.send(events);
     });
 
-    // GET /api/notifications/deliveries
     app.get('/deliveries', {
         schema: {
             tags: ['Notifications'],
             summary: 'Listar entregas de notificação (auditoria)',
             security: [{ bearerAuth: [] }],
-            querystring: {
-                type: 'object',
-                properties: {
-                    limit: { type: 'string' },
-                },
-            },
+            querystring: limitQueryJsonSchema,
         },
     }, async (request, reply) => {
-        const limitStr = (request.query as any)?.limit;
-        const limit = Math.min(Math.max(Number(limitStr || 50), 1), 200);
-
+        const query = parseSchemaOrThrow(limitQuerySchema.safeParse(request.query));
         const deliveries = await prisma.notificationDelivery.findMany({
             orderBy: { createdAt: 'desc' },
-            take: limit,
+            take: query.limit,
         });
 
         return reply.send(deliveries);

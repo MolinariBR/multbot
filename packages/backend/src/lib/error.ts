@@ -4,9 +4,13 @@ export class AppError extends Error {
 
     constructor(message: string, statusCode: number = 400) {
         super(message);
+        this.name = this.constructor.name;
         this.statusCode = statusCode;
         this.isOperational = true;
-        Error.captureStackTrace(this, this.constructor);
+
+        if (typeof Error.captureStackTrace === 'function') {
+            Error.captureStackTrace(this, this.constructor);
+        }
     }
 }
 

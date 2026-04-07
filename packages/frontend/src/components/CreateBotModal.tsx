@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import axios from 'axios'
 import { Bot, ExternalLink, Wallet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { api } from '../lib/api'
@@ -7,48 +8,98 @@ import Modal from './Modal'
 interface CreateBotModalProps {
     isOpen: boolean
     onClose: () => void
-    onSuccess: () => void
+    onBotCreated: () => void
 }
 
-export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBotModalProps) {
-    const [formData, setFormData] = useState({
-        name: '',
-        telegramToken: '',
-        ownerName: '',
-        depixAddress: '',
-        splitRate: 10,
-    })
-    const [loading, setLoading] = useState(false)
+interface BotFormData {
+    name: string
+    telegramToken: string
+    ownerFullName: string
+    depixAddress: string
+    platformFeePercentage: number
+}
 
-    const handleSubmit = async (e: React.FormEvent) => {
+interface CreateBotPayload {
+    name: string
+    telegramToken: string
+    ownerName: string
+    depixAddress: string
+    splitRate: number
+}
+
+const getInitialBotFormData = (): BotFormData => ({
+    name: '',
+    telegramToken: '',
+    ownerFullName: '',
+    depixAddress: '',
+    platformFeePercentage: 10,
+})
+
+export default function CreateBotModal({ isOpen, onClose, onBotCreated }: CreateBotModalProps) {
+    const [botFormData, setBotFormData] = useState<BotFormData>(getInitialBotFormData())
+    const [isSubmitting, setIsSubmitting] = useState(false)
+
+    const resetBotForm = () => setBotFormData(getInitialBotFormData())
+
+    const updateBotFormField = <K extends keyof BotFormData>(field: K, value: BotFormData[K]) => {
+        setBotFormData((currentFormData) => ({
+            ...currentFormData,
+            [field]: value,
+        }))
+    }
+
+    const handleCreateBotSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        setIsSubmitting(true)
 
         try {
-            setLoading(true)
-
-            await api.post('/bots', {
-                ...formData,
-                splitRate: formData.splitRate / 100, // Converter % para decimal
-            })
-
+            await createBot(buildBotPayload(botFormData))
             toast.success('Bot criado com sucesso!')
-            onSuccess()
+            onBotCreated()
             onClose()
-
-            // Resetar formulário
-            setFormData({
-                name: '',
-                telegramToken: '',
-                ownerName: '',
-                depixAddress: '',
-                splitRate: 10,
-            })
-        } catch (err: any) {
-            console.error('Erro ao criar bot:', err)
-            toast.error(err.response?.data?.error || 'Erro ao criar bot')
+            resetBotForm()
+        } catch (error: unknown) {
+            handleBotCreationError(error)
         } finally {
-            setLoading(false)
+            setIsSubmitting(false)
         }
+    }
+
+    const createBot = async (payload: CreateBotPayload) => {
+        await api.post('/bots', payload)
+    }
+
+    const buildBotPayload = (formData: BotFormData): CreateBotPayload => ({
+        name: formData.name,
+        telegramToken: formData.telegramToken,
+        ownerName: formData.ownerFullName,
+        depixAddress: formData.depixAddress,
+        splitRate: formData.platformFeePercentage / 100,
+    })
+
+    const extractBotCreationErrorMessage = (error: unknown): string => {
+        if (axios.isAxiosError(error)) {
+            const serverMessage = error.response?.data?.error
+            if (typeof serverMessage === 'string' && serverMessage.length > 0) {
+                return serverMessage
+            }
+            return error.message || 'Erro desconhecido ao criar bot'
+        }
+
+        if (error instanceof Error) {
+            return error.message
+        }
+
+        return 'Erro desconhecido ao criar bot'
+    }
+
+    const handleBotCreationError = (error: unknown) => {
+        const message = extractBotCreationErrorMessage(error)
+        console.error('Erro ao criar bot:', {
+            error,
+            formData: botFormData,
+        })
+        toast.error(message)
     }
 
     return (
@@ -59,22 +110,26 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
             icon={<Bot className="text-white" size={24} />}
             maxWidth="2xl"
         >
-            <form onSubmit={handleSubmit} className="space-y-6">
-                {/* Instruções */}
+            <form onSubmit={handleCreateBotSubmit} className="space-y-6">
                 <div className="bg-violet-500/10 border border-violet-500/30 rounded-xl p-4">
                     <h3 className="text-violet-400 font-semibold mb-2 flex items-center gap-2">
                         <ExternalLink size={16} />
                         Como obter o token do bot?
                     </h3>
                     <ol className="text-sm text-gray-300 space-y-1 list-decimal list-inside">
-                        <li>Abra o Telegram e fale com <span className="text-violet-400 font-mono">@BotFather</span></li>
-                        <li>Digite <span className="text-violet-400 font-mono">/newbot</span></li>
+                        <li>
+                            Abra o Telegram e fale com{' '}
+                            <span className="text-violet-400 font-mono">@BotFather</span>
+                        </li>
+                        <li>
+                            Digite{' '}
+                            <span className="text-violet-400 font-mono">/newbot</span>
+                        </li>
                         <li>Siga as instruções para criar seu bot</li>
                         <li>Copie o token fornecido e cole abaixo</li>
                     </ol>
                 </div>
 
-                {/* Nome do Bot */}
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">
                         Nome do Bot *
@@ -82,14 +137,15 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
                     <input
                         type="text"
                         required
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        value={botFormData.name}
+                        onChange={(e) => updateBotFormField('name', e.target.value)}
                         placeholder="Ex: Bot TechStore"
-                        className="w-full bg-black/50 border border-violet-500/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500/50 transition-colors"
+                        className={`w-full bg-black/50 border border-violet-500/20 rounded-xl
+                            px-4 py-3 text-white placeholder-gray-500 focus:outline-none
+                            focus:border-violet-500/50 transition-colors`}
                     />
                 </div>
 
-                {/* Token do Telegram */}
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">
                         Token do Telegram *
@@ -97,17 +153,18 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
                     <input
                         type="text"
                         required
-                        value={formData.telegramToken}
-                        onChange={(e) => setFormData({ ...formData, telegramToken: e.target.value })}
+                        value={botFormData.telegramToken}
+                        onChange={(e) => updateBotFormField('telegramToken', e.target.value)}
                         placeholder="1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-                        className="w-full bg-black/50 border border-violet-500/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500/50 transition-colors font-mono text-sm"
+                        className={`w-full bg-black/50 border border-violet-500/20 rounded-xl
+                            px-4 py-3 text-white placeholder-gray-500 focus:outline-none
+                            focus:border-violet-500/50 transition-colors font-mono text-sm`}
                     />
                     <p className="text-xs text-gray-500 mt-1">
                         Token fornecido pelo @BotFather
                     </p>
                 </div>
 
-                {/* Nome do Proprietário */}
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">
                         Nome do Proprietário *
@@ -115,14 +172,15 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
                     <input
                         type="text"
                         required
-                        value={formData.ownerName}
-                        onChange={(e) => setFormData({ ...formData, ownerName: e.target.value })}
+                        value={botFormData.ownerFullName}
+                        onChange={(e) => updateBotFormField('ownerFullName', e.target.value)}
                         placeholder="Ex: João Silva"
-                        className="w-full bg-black/50 border border-violet-500/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500/50 transition-colors"
+                        className={`w-full bg-black/50 border border-violet-500/20 rounded-xl
+                            px-4 py-3 text-white placeholder-gray-500 focus:outline-none
+                            focus:border-violet-500/50 transition-colors`}
                     />
                 </div>
 
-                {/* Endereço Depix */}
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
                         <Wallet size={16} />
@@ -131,17 +189,18 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
                     <input
                         type="text"
                         required
-                        value={formData.depixAddress}
-                        onChange={(e) => setFormData({ ...formData, depixAddress: e.target.value })}
+                        value={botFormData.depixAddress}
+                        onChange={(e) => updateBotFormField('depixAddress', e.target.value)}
                         placeholder="VJL..."
-                        className="w-full bg-black/50 border border-violet-500/20 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-violet-500/50 transition-colors font-mono text-sm"
+                        className={`w-full bg-black/50 border border-violet-500/20 rounded-xl
+                            px-4 py-3 text-white placeholder-gray-500 focus:outline-none
+                            focus:border-violet-500/50 transition-colors font-mono text-sm`}
                     />
                     <p className="text-xs text-gray-500 mt-1">
                         Endereço Liquid Network para receber pagamentos
                     </p>
                 </div>
 
-                {/* Taxa de Split */}
                 <div>
                     <label className="block text-sm font-medium text-gray-300 mb-2">
                         Taxa da Plataforma (%)
@@ -152,12 +211,12 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
                             min="5"
                             max="30"
                             step="1"
-                            value={formData.splitRate}
-                            onChange={(e) => setFormData({ ...formData, splitRate: Number(e.target.value) })}
+                            value={botFormData.platformFeePercentage}
+                            onChange={(e) => updateBotFormField('platformFeePercentage', Number(e.target.value))}
                             className="flex-1"
                         />
                         <div className="w-20 bg-black/50 border border-violet-500/20 rounded-xl px-3 py-2 text-center">
-                            <span className="text-violet-400 font-bold">{formData.splitRate}%</span>
+                            <span className="text-violet-400 font-bold">{botFormData.platformFeePercentage}%</span>
                         </div>
                     </div>
                     <p className="text-xs text-gray-500 mt-1">
@@ -165,40 +224,42 @@ export default function CreateBotModal({ isOpen, onClose, onSuccess }: CreateBot
                     </p>
                 </div>
 
-                {/* Preview do Split */}
                 <div className="bg-black/30 border border-violet-500/10 rounded-xl p-4">
                     <h4 className="text-sm font-semibold text-gray-300 mb-3">Exemplo de Split (R$ 100,00)</h4>
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <p className="text-xs text-gray-500 mb-1">Proprietário recebe</p>
                             <p className="text-lg font-bold text-emerald-400">
-                                R$ {(100 * (1 - formData.splitRate / 100)).toFixed(2)}
+                                R$ {(100 * (1 - botFormData.platformFeePercentage / 100)).toFixed(2)}
                             </p>
                         </div>
                         <div>
                             <p className="text-xs text-gray-500 mb-1">Plataforma recebe</p>
                             <p className="text-lg font-bold text-violet-400">
-                                R$ {(100 * (formData.splitRate / 100)).toFixed(2)}
+                                R$ {(100 * (botFormData.platformFeePercentage / 100)).toFixed(2)}
                             </p>
                         </div>
                     </div>
                 </div>
 
-                {/* Buttons */}
                 <div className="flex gap-3 pt-4">
                     <button
                         type="button"
                         onClick={onClose}
-                        className="flex-1 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-colors"
+                        className={`flex-1 px-6 py-3 bg-white/5 hover:bg-white/10
+                            border border-white/10 rounded-xl text-white font-medium
+                            transition-colors`}
                     >
                         Cancelar
                     </button>
                     <button
                         type="submit"
-                        disabled={loading}
-                        className="flex-1 px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-white font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isSubmitting}
+                        className={`flex-1 px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600
+                            hover:from-violet-500 hover:to-fuchsia-500 rounded-xl text-white
+                            font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
-                        {loading ? 'Criando...' : 'Criar Bot'}
+                        {isSubmitting ? 'Criando...' : 'Criar Bot'}
                     </button>
                 </div>
             </form>

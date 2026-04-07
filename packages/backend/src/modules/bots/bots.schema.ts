@@ -21,6 +21,50 @@ export const listBotsQuerySchema = z.object({
     search: z.string().optional(),
 });
 
+export const botIdParamsSchema = z.object({
+    id: z.string().min(1, 'ID do bot é obrigatório'),
+});
+
+export const listBotsQueryJsonSchema = {
+    type: 'object',
+    properties: {
+        status: { type: 'string', enum: ['active', 'inactive'] },
+        search: { type: 'string' },
+    },
+} as const;
+
+export const botIdParamsJsonSchema = {
+    type: 'object',
+    required: ['id'],
+    properties: {
+        id: { type: 'string' },
+    },
+} as const;
+
+export const createBotBodyJsonSchema = {
+    type: 'object',
+    required: ['name', 'telegramToken', 'ownerName', 'depixAddress'],
+    properties: {
+        name: { type: 'string' },
+        telegramToken: { type: 'string' },
+        ownerName: { type: 'string' },
+        depixAddress: { type: 'string' },
+        splitRate: { type: 'number' },
+    },
+} as const;
+
+export const updateBotBodyJsonSchema = {
+    type: 'object',
+    properties: {
+        name: { type: 'string' },
+        ownerName: { type: 'string' },
+        depixAddress: { type: 'string' },
+        splitRate: { type: 'number' },
+        status: { type: 'string', enum: ['active', 'inactive'] },
+    },
+} as const;
+
 export type CreateBotInput = z.infer<typeof createBotSchema>;
 export type UpdateBotInput = z.infer<typeof updateBotSchema>;
 export type ListBotsQuery = z.infer<typeof listBotsQuerySchema>;
+export type BotIdParams = z.infer<typeof botIdParamsSchema>;
