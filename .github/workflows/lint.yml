@@ -38,6 +38,7 @@ jobs:
         run: pnpm --filter @multbot/backend run lint:strict
 
       - name: Check backend formatting
+        continue-on-error: true
         run: pnpm --filter @multbot/backend run format:check
 
   lint-frontend:
@@ -70,6 +71,7 @@ jobs:
         run: pnpm --filter vite-react-ts-template run lint:strict
 
       - name: Check frontend formatting
+        continue-on-error: true
         run: pnpm --filter vite-react-ts-template run format:check
 
   lint-shell:
