@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "build:dev": "vite build --mode development",
-    "lint": "eslint .",
+    "lint": "pnpm exec eslint --config ../../eslint.config.mjs \"src/**/*.{ts,tsx,js,jsx,mjs,cjs}\"",
+    "lint:strict": "pnpm exec eslint --config ../../eslint.strict.config.mjs \"src/**/*.{ts,tsx,js,jsx,mjs,cjs}\"",
+    "format": "pnpm exec prettier --write \"src/**/*.{ts,tsx,js,jsx,mjs,cjs,css,json}\"",
+    "format:check": "pnpm exec prettier --check \"src/**/*.{ts,tsx,js,jsx,mjs,cjs,css,json}\"",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -34,10 +37,5 @@
     "typescript": "5.5.3",
     "typescript-eslint": "8.3.0",
     "vite": "^5.4.21"
-  },
-  "pnpm": {
-    "overrides": {
-      "@swc/core": "1.13.3"
-    }
   }
 }

@@ -1,0 +1,90 @@
+name: Lint
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-backend:
+    name: Lint Backend (TypeScript)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run backend lint
+        run: pnpm --filter @multbot/backend run lint
+
+      - name: Run backend strict limits
+        run: pnpm --filter @multbot/backend run lint:strict
+
+      - name: Check backend formatting
+        run: pnpm --filter @multbot/backend run format:check
+
+  lint-frontend:
+    name: Lint Frontend (TypeScript/React)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend lint
+        run: pnpm --filter vite-react-ts-template run lint
+
+      - name: Run frontend strict limits
+        run: pnpm --filter vite-react-ts-template run lint:strict
+
+      - name: Check frontend formatting
+        run: pnpm --filter vite-react-ts-template run format:check
+
+  lint-shell:
+    name: Lint Shell Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck and shfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt
+
+      - name: Run shellcheck
+        run: shellcheck deploy.sh setup-ssl.sh vps-update.sh
+
+      - name: Check shell formatting
+        run: shfmt -d deploy.sh setup-ssl.sh vps-update.sh

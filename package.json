@@ -11,7 +11,37 @@
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
-    "format": "pnpm -r run format"
+    "lint:strict": "pnpm -r run lint:strict",
+    "format": "pnpm -r run format",
+    "format:check": "pnpm -r run format:check",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs,json,md,css,scss,yml,yaml}": [
+      "pnpm exec prettier --write"
+    ],
+    "*.{js,jsx,ts,tsx,mjs,cjs}": [
+      "pnpm exec eslint --fix",
+      "pnpm exec eslint --config eslint.strict.config.mjs"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "9.9.1",
+    "eslint": "9.9.1",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react-hooks": "5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "0.4.11",
+    "eslint-plugin-unused-imports": "^4.4.0",
+    "globals": "15.9.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.5.3",
+    "typescript-eslint": "8.3.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@swc/core": "1.13.3"
+    }
   },
   "keywords": [
     "telegram",

@@ -1,0 +1,80 @@
+name: Build
+
+on:
+  workflow_run:
+    workflows: ['Lint']
+    types: [completed]
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  build-backend:
+    name: Build Backend
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run backend tests if present
+        run: pnpm --filter @multbot/backend run test --if-present
+
+      - name: Build backend
+        run: pnpm --filter @multbot/backend run build
+
+  build-frontend:
+    name: Build Frontend
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend tests if present
+        run: pnpm --filter vite-react-ts-template run test --if-present
+
+      - name: Build frontend
+        run: pnpm --filter vite-react-ts-template run build
+
+      - name: Upload frontend build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: packages/frontend/dist
+          if-no-files-found: error
