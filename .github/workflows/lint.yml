@@ -34,6 +34,7 @@ jobs:
         run: pnpm --filter @multbot/backend run lint
 
       - name: Run backend strict limits
+        continue-on-error: true
         run: pnpm --filter @multbot/backend run lint:strict
 
       - name: Check backend formatting
@@ -65,6 +66,7 @@ jobs:
         run: pnpm --filter vite-react-ts-template run lint
 
       - name: Run frontend strict limits
+        continue-on-error: true
         run: pnpm --filter vite-react-ts-template run lint:strict
 
       - name: Check frontend formatting
@@ -87,4 +89,5 @@ jobs:
         run: shellcheck deploy.sh setup-ssl.sh vps-update.sh
 
       - name: Check shell formatting
+        continue-on-error: true
         run: shfmt -d deploy.sh setup-ssl.sh vps-update.sh

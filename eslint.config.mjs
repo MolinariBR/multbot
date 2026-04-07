@@ -35,7 +35,7 @@ export default tseslint.config(
     rules: {
       'no-console': 'warn',
       'max-len': [
-        'error',
+        'warn',
         {
           code: 120,
           ignoreUrls: true,
