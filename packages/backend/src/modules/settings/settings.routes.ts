@@ -1,22 +1,59 @@
 import type { FastifyPluginAsync } from 'fastify';
-import { updateSettingsSchema } from './settings.schema.js';
-import * as settingsService from './settings.service.js';
 import { ValidationError } from '../../lib/error.js';
+import type { UpdateSettingsInput } from './settings.schema.js';
+import { updateSettingsSchema } from './settings.schema.js';
+import {
+    getSettings,
+    testDepixConnection,
+    updateSettings,
+} from './settings.service.js';
+
+function normalizeFieldErrors(
+    fieldErrors: Record<string, string[] | undefined>,
+): Record<string, string[]> {
+    return Object.fromEntries(
+        Object.entries(fieldErrors).map(([field, errors]) => [field, errors ?? []]),
+    );
+}
+
+function parseUpdateSettingsInputOrThrow(requestBody: unknown): UpdateSettingsInput {
+    const parsedResult = updateSettingsSchema.safeParse(requestBody);
+    if (parsedResult.success) {
+        return parsedResult.data;
+    }
+
+    throw new ValidationError(
+        'Dados inválidos',
+        normalizeFieldErrors(parsedResult.error.flatten().fieldErrors),
+    );
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : 'erro desconhecido';
+}
+
+async function reloadDepixRuntimeConfigurationOrThrow(): Promise<void> {
+    try {
+        const { depixService } = await import('../depix/depix.service.js');
+        await depixService.initialize();
+    } catch (error: unknown) {
+        const errorMessage = getErrorMessage(error);
+        throw new Error(`Falha ao recarregar configuração Depix em runtime: ${errorMessage}`);
+    }
+}
 
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
-    // GET /api/settings
     app.get('/', {
         schema: {
             tags: ['Settings'],
             summary: 'Obter configurações',
             security: [{ bearerAuth: [] }],
         },
-    }, async (request, reply) => {
-        const settings = await settingsService.getSettings();
+    }, async (_request, reply) => {
+        const settings = await getSettings();
         return reply.send(settings);
     });
 
-    // PUT /api/settings
     app.put('/', {
         schema: {
             tags: ['Settings'],
@@ -24,28 +61,20 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
             security: [{ bearerAuth: [] }],
         },
     }, async (request, reply) => {
-        const parsed = updateSettingsSchema.safeParse(request.body);
-
-        if (!parsed.success) {
-            throw new ValidationError('Dados inválidos', parsed.error.flatten().fieldErrors as any);
-        }
-
-        const settings = await settingsService.updateSettings(parsed.data);
-        // Recarrega config em runtime para evitar exigir restart após configurar credenciais.
-        const { depixService } = await import('../depix/depix.service.js');
-        await depixService.initialize();
+        const settingsInput = parseUpdateSettingsInputOrThrow(request.body);
+        const settings = await updateSettings(settingsInput);
+        await reloadDepixRuntimeConfigurationOrThrow();
         return reply.send(settings);
     });
 
-    // POST /api/settings/test-depix
     app.post('/test-depix', {
         schema: {
             tags: ['Settings'],
             summary: 'Testar conexão Depix',
             security: [{ bearerAuth: [] }],
         },
-    }, async (request, reply) => {
-        const result = await settingsService.testDepixConnection();
+    }, async (_request, reply) => {
+        const result = await testDepixConnection();
         return reply.send(result);
     });
 };
