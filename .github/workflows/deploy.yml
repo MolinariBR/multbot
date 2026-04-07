@@ -54,7 +54,7 @@ jobs:
           git remote remove heroku 2>/dev/null || true
           git remote add heroku "https://heroku:${{ env.HEROKU_API_KEY }}@git.heroku.com/${{ env.HEROKU_APP_NAME }}.git"
           BACKEND_TREE_SHA="$(git subtree split --prefix packages/backend)"
-          git push heroku "${BACKEND_TREE_SHA}:main" --force
+          git push heroku "${BACKEND_TREE_SHA}:refs/heads/main" --force
           heroku ps:scale web=1 --app "${{ env.HEROKU_APP_NAME }}"
 
       - name: Open issue when backend deploy fails
@@ -106,6 +106,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
         run: npm install -g vercel
@@ -117,13 +126,16 @@ jobs:
           test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
           test -n "${{ env.BACKEND_API_URL }}" || (echo "Missing secret: BACKEND_API_URL" && exit 1)
 
+      - name: Build frontend
+        run: |
+          export VITE_API_URL="${{ env.BACKEND_API_URL }}"
+          pnpm --filter vite-react-ts-template run build
+
       - name: Deploy frontend to Vercel preview
         run: |
           cd packages/frontend
-          export VITE_API_URL="${{ env.BACKEND_API_URL }}"
           vercel pull --yes --environment=preview --token="${{ env.VERCEL_TOKEN }}"
-          vercel build --token="${{ env.VERCEL_TOKEN }}"
-          DEPLOYMENT_URL="$(vercel deploy --prebuilt --token="${{ env.VERCEL_TOKEN }}")"
+          DEPLOYMENT_URL="$(vercel deploy dist --yes --token="${{ env.VERCEL_TOKEN }}")"
           echo "Frontend preview URL: ${DEPLOYMENT_URL}"
 
       - name: Open issue when frontend deploy fails
@@ -196,7 +208,7 @@ jobs:
           git remote remove heroku 2>/dev/null || true
           git remote add heroku "https://heroku:${{ env.HEROKU_API_KEY }}@git.heroku.com/${{ env.HEROKU_APP_NAME }}.git"
           BACKEND_TREE_SHA="$(git subtree split --prefix packages/backend)"
-          git push heroku "${BACKEND_TREE_SHA}:main" --force
+          git push heroku "${BACKEND_TREE_SHA}:refs/heads/main" --force
           heroku ps:scale web=1 --app "${{ env.HEROKU_APP_NAME }}"
 
       - name: Open issue when backend deploy fails
@@ -248,6 +260,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Install Vercel CLI
         run: npm install -g vercel
@@ -259,13 +280,16 @@ jobs:
           test -n "${{ env.VERCEL_PROJECT_ID }}" || (echo "Missing secret: VERCEL_PROJECT_ID" && exit 1)
           test -n "${{ env.BACKEND_API_URL }}" || (echo "Missing secret: BACKEND_API_URL" && exit 1)
 
+      - name: Build frontend
+        run: |
+          export VITE_API_URL="${{ env.BACKEND_API_URL }}"
+          pnpm --filter vite-react-ts-template run build
+
       - name: Deploy frontend to Vercel production
         run: |
           cd packages/frontend
-          export VITE_API_URL="${{ env.BACKEND_API_URL }}"
           vercel pull --yes --environment=production --token="${{ env.VERCEL_TOKEN }}"
-          vercel build --prod --token="${{ env.VERCEL_TOKEN }}"
-          DEPLOYMENT_URL="$(vercel deploy --prebuilt --prod --token="${{ env.VERCEL_TOKEN }}")"
+          DEPLOYMENT_URL="$(vercel deploy dist --prod --yes --token="${{ env.VERCEL_TOKEN }}")"
           echo "Frontend production URL: ${DEPLOYMENT_URL}"
 
       - name: Open issue when frontend deploy fails
