@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows: ['Build']
     types: [completed]
-    branches: [main, develop]
 
 permissions:
   contents: read

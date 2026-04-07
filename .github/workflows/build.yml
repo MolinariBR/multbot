@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows: ['Lint']
     types: [completed]
-    branches: [main, develop]
 
 permissions:
   contents: read
@@ -12,7 +11,7 @@ permissions:
 jobs:
   build-backend:
     name: Build Backend
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'develop') }}
     runs-on: ubuntu-latest
 
     steps:
@@ -46,7 +45,7 @@ jobs:
 
   build-frontend:
     name: Build Frontend
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event.workflow_run.conclusion == 'success' && (github.event.workflow_run.head_branch == 'main' || github.event.workflow_run.head_branch == 'develop') }}
     runs-on: ubuntu-latest
 
     steps:
