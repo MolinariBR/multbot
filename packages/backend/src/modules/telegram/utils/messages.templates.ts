@@ -10,6 +10,7 @@ export type PaymentStatusItem = {
     id: string;
     amount: string;
     status: string;
+    statusLabel?: string;
     date: string;
 };
 
@@ -29,7 +30,8 @@ Use /pagar para fazer seu primeiro pagamento!
 
 function buildPaymentStatusList(payments: PaymentStatusItem[]): string {
     return payments.map((payment, index) => (
-        `${index + 1}. ${payment.amount} - ${getStatusEmoji(payment.status)} ${payment.status}`
+        `${index + 1}. ${payment.amount} - `
+        + `${getStatusEmoji(payment.status)} ${payment.statusLabel ?? payment.status}`
         + `\n   ${payment.date} | ID: \`${payment.id}\``
     )).join('\n\n');
 }
