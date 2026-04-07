@@ -33,10 +33,7 @@ sudo systemctl reload nginx
 
 # 4. Obter e instalar Certificado SSL
 echo "🔐 Solicitando certificado SSL (Let's Encrypt)..."
-sudo certbot --nginx -d $DOMAIN --non-interactive --agree-tos -m $EMAIL --redirect
-
-# 5. Verificação final
-if [ $? -eq 0 ]; then
+if sudo certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "$EMAIL" --redirect; then
     echo ""
     echo "✅ HTTPS Configurado com Sucesso!"
     echo "🌐 Acesse agora: https://$DOMAIN"
